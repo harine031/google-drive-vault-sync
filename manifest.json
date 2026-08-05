@@ -1,9 +1,9 @@
 {
   "id": "google-drive-vault-sync",
   "name": "Google Drive Vault Sync",
-  "version": "0.1.2",
-  "minAppVersion": "1.6.0",
-  "description": "Safety-first Google Drive synchronization for Windows and iPhone, including attachments and selected Obsidian configuration.",
+  "version": "0.2.0",
+  "minAppVersion": "1.11.4",
+  "description": "Encrypted, safety-first Google Drive synchronization for Windows and iPhone.",
   "author": "harine",
   "isDesktopOnly": false
 }

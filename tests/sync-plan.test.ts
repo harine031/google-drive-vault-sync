@@ -15,7 +15,10 @@ const remote = (path: string, hash: string): RemoteFileInfo => ({
   hash,
   size: 1,
   mimeType: "text/markdown",
-  modifiedTime: "2026-08-03T00:00:00Z"
+  modifiedTime: "2026-08-03T00:00:00Z",
+  encrypted: true,
+  cipherHash: "c".repeat(64),
+  iv: "AAAAAAAAAAAAAAAA"
 });
 
 describe("sync plan", () => {
@@ -44,5 +47,14 @@ describe("sync plan", () => {
     };
     const plan = buildSyncPlan([], [remote("note.md", "old")], state);
     expect(plan[0].kind).toBe("skip");
+  });
+
+  it("migrates matching plaintext files and blocks unsafe legacy downloads", () => {
+    const legacy = { ...remote("note.md", "same"), encrypted: false, cipherHash: undefined, iv: undefined };
+    expect(buildSyncPlan([local("note.md", "same")], [legacy], { records: {}, lastSyncAt: null })[0]).toMatchObject({
+      kind: "upload",
+      reason: expect.stringContaining("暗号化移行")
+    });
+    expect(buildSyncPlan([], [legacy], { records: {}, lastSyncAt: null })[0]).toMatchObject({ kind: "skip" });
   });
 });

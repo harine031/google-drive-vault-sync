@@ -1,11 +1,46 @@
-const normalize = (path: string): string => path.replace(/\\/g, "/").replace(/^\/+/, "");
+const normalize = (path: string): string => path.replace(/\\/g, "/").replace(/^\/+/, "").normalize("NFC");
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+const SAFE_CONFIG_FILES = new Set([
+  "app.json",
+  "appearance.json",
+  "bookmarks.json",
+  "core-plugins.json",
+  "core-plugins-migration.json",
+  "graph.json",
+  "hotkeys.json",
+  "templates.json",
+  "types.json"
+]);
 
 export function isSafeVaultPath(inputPath: string): boolean {
-  if (!inputPath || inputPath.includes("\\") || inputPath.startsWith("/") || /^[A-Za-z]:/.test(inputPath)) {
+  if (!inputPath || inputPath.length > 1024 || inputPath.includes("\\") || inputPath.startsWith("/") || /^[A-Za-z]:/.test(inputPath)) {
     return false;
   }
-  const segments = inputPath.split("/");
-  return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== ".." && !segment.includes("\0"));
+  const segments = inputPath.normalize("NFC").split("/");
+  return segments.every((segment) =>
+    segment.length > 0 &&
+    segment.length <= 255 &&
+    segment !== "." &&
+    segment !== ".." &&
+    !/[\u0000-\u001F<>:"|?*]/.test(segment) &&
+    !/[ .]$/.test(segment) &&
+    !WINDOWS_RESERVED.test(segment)
+  );
+}
+
+export function canonicalVaultPath(path: string): string {
+  return normalize(path).toLowerCase();
+}
+
+export function assertNoPathCollisions(paths: string[]): void {
+  const seen = new Map<string, string>();
+  for (const path of paths) {
+    if (!isSafeVaultPath(path)) throw new Error(`${path}: クロスプラットフォームで安全でないパスです`);
+    const canonical = canonicalVaultPath(path);
+    const existing = seen.get(canonical);
+    if (existing) throw new Error(`${existing} と ${path}: 同一またはクロスプラットフォーム上で衝突するパスです`);
+    seen.set(canonical, path);
+  }
 }
 
 function globToRegExp(glob: string): RegExp {
@@ -30,11 +65,15 @@ function globToRegExp(glob: string): RegExp {
 export function isPathExcluded(
   inputPath: string,
   includeObsidianConfig: boolean,
-  excludePatterns: string[]
+  excludePatterns: string[],
+  configDir: string
 ): boolean {
   const path = normalize(inputPath);
-  if (!includeObsidianConfig && (path === ".obsidian" || path.startsWith(".obsidian/"))) {
-    return true;
+  const normalizedConfigDir = normalize(configDir).replace(/\/$/, "");
+  if (path === normalizedConfigDir || path.startsWith(`${normalizedConfigDir}/`)) {
+    if (!includeObsidianConfig) return true;
+    const relative = path.slice(normalizedConfigDir.length + 1);
+    if (!relative || relative.includes("/") || !SAFE_CONFIG_FILES.has(relative)) return true;
   }
   return excludePatterns.some((pattern) => globToRegExp(normalize(pattern)).test(path));
 }
@@ -42,10 +81,14 @@ export function isPathExcluded(
 export function shouldTraverseFolder(
   inputPath: string,
   includeObsidianConfig: boolean,
-  excludePatterns: string[]
+  excludePatterns: string[],
+  configDir: string
 ): boolean {
-  const path = `${normalize(inputPath).replace(/\/$/, "")}/`;
-  if (!includeObsidianConfig && path.startsWith(".obsidian/")) return false;
+  const folder = normalize(inputPath).replace(/\/$/, "");
+  const normalizedConfigDir = normalize(configDir).replace(/\/$/, "");
+  if (folder === normalizedConfigDir) return includeObsidianConfig;
+  if (folder.startsWith(`${normalizedConfigDir}/`)) return false;
+  const path = `${folder}/`;
   return !excludePatterns.some((pattern) => {
     const normalizedPattern = normalize(pattern);
     if (!normalizedPattern.endsWith("/**")) return false;

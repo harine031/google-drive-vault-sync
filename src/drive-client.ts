@@ -1,6 +1,7 @@
 import { requestUrl } from "obsidian";
-import { isSafeVaultPath } from "./path-policy";
-import type { RemoteFileInfo } from "./types";
+import { decryptVaultFile, encryptVaultFile, FILE_ENCRYPTION_FORMAT } from "./file-crypto";
+import { assertNoPathCollisions, isSafeVaultPath } from "./path-policy";
+import { MAX_FILE_SIZE_BYTES, type RemoteFileInfo } from "./types";
 
 interface DriveFileResource {
   id: string;
@@ -19,12 +20,14 @@ interface DriveListResponse {
 const API = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class GoogleDriveClient {
   constructor(
     private readonly getAccessToken: () => Promise<string>,
     private readonly vaultId: () => string,
-    private readonly folderName: () => string
+    private readonly folderName: () => string,
+    private readonly getVaultKey: () => string
   ) {}
 
   async testConnection(): Promise<boolean> {
@@ -47,82 +50,88 @@ export class GoogleDriveClient {
       const response = await this.request(`${API}/files?${params.toString()}`, "GET");
       ensureSuccess(response.status, "Driveファイル一覧の取得");
       const data = response.json as DriveListResponse;
-      for (const file of data.files ?? []) {
-        const path = file.appProperties?.path;
-        const hash = file.appProperties?.sha256;
-        if (!path || !hash || !isSafeVaultPath(path)) continue;
-        files.push({
-          id: file.id,
-          path,
-          hash,
-          size: Number(file.size ?? 0),
-          mimeType: file.mimeType,
-          modifiedTime: file.modifiedTime ?? ""
-        });
-      }
+      for (const file of data.files ?? []) files.push(parseRemoteFile(file));
       pageToken = data.nextPageToken ?? "";
     } while (pageToken);
-    return deduplicateByNewest(files);
+    assertNoPathCollisions(files.map((file) => file.path));
+    return files;
   }
 
-  async download(fileId: string): Promise<ArrayBuffer> {
-    const response = await this.request(`${API}/files/${encodeURIComponent(fileId)}?alt=media`, "GET");
+  async downloadVerified(remote: RemoteFileInfo): Promise<ArrayBuffer> {
+    if (!remote.encrypted || !remote.cipherHash || !remote.iv) {
+      throw new Error(`${remote.path}: 平文の旧形式です。Windows側で暗号化移行してください`);
+    }
+    assertAllowedSize(remote.size, 16);
+    const response = await this.request(`${API}/files/${encodeURIComponent(remote.id)}?alt=media`, "GET");
     ensureSuccess(response.status, "ファイルのダウンロード");
-    return response.arrayBuffer;
+    assertAllowedSize(response.arrayBuffer.byteLength, 16);
+    return decryptVaultFile(
+      response.arrayBuffer,
+      this.getVaultKey(),
+      this.vaultId(),
+      remote.path,
+      remote.iv,
+      remote.cipherHash,
+      remote.hash
+    );
   }
 
-  async upload(
+  async uploadEncrypted(
     path: string,
     bytes: ArrayBuffer,
     mimeType: string,
     sha256: string,
     existingFileId?: string
   ): Promise<RemoteFileInfo> {
+    assertAllowedSize(bytes.byteLength);
+    if (!SHA256_PATTERN.test(sha256)) throw new Error(`${path}: SHA-256形式が正しくありません`);
+    const encrypted = await encryptVaultFile(bytes, this.getVaultKey(), this.vaultId(), path);
     const folderId = await this.ensureVaultFolder();
     const metadata: Record<string, unknown> = {
       name: basename(path),
-      mimeType,
+      mimeType: "application/octet-stream",
       appProperties: {
         vaultId: this.vaultId(),
         kind: "vaultFile",
         path,
-        sha256
+        sha256,
+        cipherSha256: encrypted.cipherHash,
+        encryption: FILE_ENCRYPTION_FORMAT,
+        iv: encrypted.iv,
+        originalMimeType: mimeType
       }
     };
     if (!existingFileId) metadata.parents = [folderId];
     const boundary = `obsidian-sync-${crypto.randomUUID()}`;
-    const body = multipartBody(boundary, metadata, mimeType, bytes);
+    const body = multipartBody(boundary, metadata, "application/octet-stream", encrypted.bytes);
     const url = existingFileId
       ? `${UPLOAD_API}/files/${encodeURIComponent(existingFileId)}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,appProperties`
       : `${UPLOAD_API}/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,appProperties`;
     const response = await this.request(url, existingFileId ? "PATCH" : "POST", body, {
       "Content-Type": `multipart/related; boundary=${boundary}`
     });
-    ensureSuccess(response.status, "ファイルのアップロード");
+    ensureSuccess(response.status, "ファイルの暗号化アップロード");
     const file = response.json as DriveFileResource;
     return {
       id: file.id,
       path,
       hash: sha256,
-      size: Number(file.size ?? bytes.byteLength),
+      size: Number(file.size ?? encrypted.bytes.byteLength),
       mimeType,
-      modifiedTime: file.modifiedTime ?? new Date().toISOString()
+      modifiedTime: file.modifiedTime ?? new Date().toISOString(),
+      encrypted: true,
+      cipherHash: encrypted.cipherHash,
+      iv: encrypted.iv
     };
   }
 
   private async ensureVaultFolder(): Promise<string> {
     const query = `trashed = false and mimeType = '${FOLDER_MIME}' and appProperties has { key='vaultId' and value='${escapeQuery(this.vaultId())}' } and appProperties has { key='kind' and value='vaultRoot' }`;
-    const params = new URLSearchParams({
-      q: query,
-      spaces: "drive",
-      pageSize: "1",
-      fields: "files(id)"
-    });
+    const params = new URLSearchParams({ q: query, spaces: "drive", pageSize: "1", fields: "files(id)" });
     const search = await this.request(`${API}/files?${params.toString()}`, "GET");
     ensureSuccess(search.status, "同期フォルダーの検索");
     const existing = (search.json as DriveListResponse).files?.[0];
     if (existing) return existing.id;
-
     const create = await this.request(
       `${API}/files?fields=id`,
       "POST",
@@ -137,12 +146,7 @@ export class GoogleDriveClient {
     return (create.json as DriveFileResource).id;
   }
 
-  private async request(
-    url: string,
-    method: string,
-    body?: string | ArrayBuffer,
-    headers: Record<string, string> = {}
-  ) {
+  private async request(url: string, method: string, body?: string | ArrayBuffer, headers: Record<string, string> = {}) {
     const token = await this.getAccessToken();
     return requestUrl({
       url,
@@ -151,6 +155,39 @@ export class GoogleDriveClient {
       body,
       throw: false
     });
+  }
+}
+
+function parseRemoteFile(file: DriveFileResource): RemoteFileInfo {
+  const properties = file.appProperties ?? {};
+  const path = properties.path;
+  const hash = properties.sha256;
+  if (!path || !isSafeVaultPath(path)) throw new Error(`${path || file.name}: Drive上のパスが安全ではありません`);
+  if (!hash || !SHA256_PATTERN.test(hash)) throw new Error(`${path}: Drive上のSHA-256が正しくありません`);
+  const size = Number(file.size ?? 0);
+  if (!Number.isFinite(size) || size < 0) throw new Error(`${path}: Drive上のファイルサイズが正しくありません`);
+  const encrypted = properties.encryption === FILE_ENCRYPTION_FORMAT;
+  if (properties.encryption && !encrypted) throw new Error(`${path}: 未対応の暗号化形式です`);
+  if (encrypted && (!properties.cipherSha256 || !SHA256_PATTERN.test(properties.cipherSha256) || !properties.iv)) {
+    throw new Error(`${path}: Drive暗号メタデータが不完全です`);
+  }
+  assertAllowedSize(size, encrypted ? 16 : 0);
+  return {
+    id: file.id,
+    path,
+    hash,
+    size,
+    mimeType: properties.originalMimeType ?? file.mimeType,
+    modifiedTime: file.modifiedTime ?? "",
+    encrypted,
+    cipherHash: properties.cipherSha256,
+    iv: properties.iv
+  };
+}
+
+function assertAllowedSize(size: number, encryptionOverhead = 0): void {
+  if (size > MAX_FILE_SIZE_BYTES + encryptionOverhead) {
+    throw new Error(`100 MiBを超えるファイルは安全のため同期できません (${size} bytes)`);
   }
 }
 
@@ -166,12 +203,7 @@ function basename(path: string): string {
   return path.split("/").pop() ?? path;
 }
 
-function multipartBody(
-  boundary: string,
-  metadata: Record<string, unknown>,
-  mimeType: string,
-  content: ArrayBuffer
-): ArrayBuffer {
+function multipartBody(boundary: string, metadata: Record<string, unknown>, mimeType: string, content: ArrayBuffer): ArrayBuffer {
   const encoder = new TextEncoder();
   const prefix = encoder.encode(
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
@@ -183,13 +215,4 @@ function multipartBody(
   result.set(new Uint8Array(content), prefix.byteLength);
   result.set(suffix, prefix.byteLength + content.byteLength);
   return result.buffer;
-}
-
-function deduplicateByNewest(files: RemoteFileInfo[]): RemoteFileInfo[] {
-  const byPath = new Map<string, RemoteFileInfo>();
-  for (const file of files) {
-    const existing = byPath.get(file.path);
-    if (!existing || file.modifiedTime > existing.modifiedTime) byPath.set(file.path, file);
-  }
-  return [...byPath.values()];
 }

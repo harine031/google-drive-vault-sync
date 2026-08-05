@@ -19,6 +19,19 @@ export function buildSyncPlan(
     const remote = remoteByPath.get(path);
     const record = state.records[path];
 
+    if (remote && !remote.encrypted) {
+      if (local && local.hash === remote.hash) {
+        return { kind: "upload", path, local, remote, reason: "旧形式の平文Driveファイルを暗号化移行" };
+      }
+      return {
+        kind: "skip",
+        path,
+        local,
+        remote,
+        reason: "旧形式の平文Driveファイルです。内容が一致するWindowsローカル原本から暗号化移行してください"
+      };
+    }
+
     if (local && !remote) {
       if (record?.remoteFileId) {
         return { kind: "skip", path, local, reason: "Drive側の削除を検出。MVPでは自動復元・自動削除しません" };
