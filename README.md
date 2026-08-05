@@ -4,7 +4,7 @@ WindowsとiPhoneのObsidian VaultをGoogle Drive経由で同期する、安全�
 
 ## 現在の段階
 
-`0.1.1` はWindows・iPhone向けMVPです。
+`0.1.2` はWindows・iPhone向けMVPです。
 
 - Google公式OAuthエンドポイントへ直接接続（PKCE＋loopback）
 - `drive.file` スコープのみ使用

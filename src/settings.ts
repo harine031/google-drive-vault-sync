@@ -171,13 +171,16 @@ class ExportPairingModal extends Modal {
       text: "12文字以上のパスフレーズで暗号化します。コードとパスフレーズは別々の経路でiPhoneへ渡してください。"
     });
     const password = this.contentEl.createEl("input", { type: "password", placeholder: "12文字以上のパスフレーズ" });
-    password.addClass("setting-item-control");
+    password.style.width = "100%";
+    password.style.marginBottom = "12px";
+    password.setAttribute("autocomplete", "new-password");
     const output = this.contentEl.createEl("textarea", { placeholder: "ここに暗号化コードが表示されます" });
     output.readOnly = true;
     output.rows = 6;
     output.style.width = "100%";
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     const generate = buttons.createEl("button", { text: "作成してコピー", cls: "mod-cta" });
+    window.setTimeout(() => password.focus(), 0);
     generate.addEventListener("click", () => {
       void (async () => {
         try {

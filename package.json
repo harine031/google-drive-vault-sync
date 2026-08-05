@@ -1,6 +1,6 @@
 {
   "name": "google-drive-vault-sync",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Safety-first Google Drive synchronization for Obsidian on Windows and iPhone",
   "main": "main.js",
   "scripts": {
