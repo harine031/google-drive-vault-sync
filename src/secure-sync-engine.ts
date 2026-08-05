@@ -1,4 +1,4 @@
-import { App, normalizePath } from "obsidian";
+import { App, normalizePath, TFile, TFolder } from "obsidian";
 import { sha256Hex } from "./crypto-utils";
 import { GoogleDriveClient } from "./drive-client";
 import {
@@ -8,7 +8,7 @@ import {
   mimeTypeForPath,
   shouldTraverseFolder
 } from "./path-policy";
-import { buildSyncPlan } from "./sync-plan";
+import { buildRestorePlan, buildSyncPlan } from "./sync-plan";
 import type {
   LocalFileInfo,
   PluginSettings,
@@ -36,6 +36,11 @@ export class SyncEngine {
     const [local, remoteFiles] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
     const remote = this.applyRemotePolicy(remoteFiles);
     return buildSyncPlan(local, remote, this.state);
+  }
+
+  async previewRestore(): Promise<SyncAction[]> {
+    const [local, remoteFiles] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
+    return buildRestorePlan(local, this.applyRemotePolicy(remoteFiles));
   }
 
   async apply(plan: SyncAction[]): Promise<SyncResult> {
@@ -210,8 +215,20 @@ export class SyncEngine {
   private async writeLocal(path: string, bytes: ArrayBuffer): Promise<void> {
     if (!isSafeVaultPath(path)) throw new Error(`${path}: 書き込み先パスが安全ではありません`);
     assertAllowedSize(bytes.byteLength, path);
-    await ensureParentFolders(this.app, path);
-    await this.app.vault.adapter.writeBinary(normalizePath(path), bytes);
+    const normalized = normalizePath(path);
+    if (normalized === this.app.vault.configDir || normalized.startsWith(`${this.app.vault.configDir}/`)) {
+      await ensureParentFolders(this.app, normalized);
+      await this.app.vault.adapter.writeBinary(normalized, bytes);
+      return;
+    }
+    await ensureIndexedParentFolders(this.app, normalized);
+    const existing = this.app.vault.getAbstractFileByPath(normalized);
+    if (existing instanceof TFolder) throw new Error(`${path}: 復元先に同名フォルダーが存在します`);
+    if (existing instanceof TFile) {
+      await this.app.vault.modifyBinary(existing, bytes);
+    } else {
+      await this.app.vault.createBinary(normalized, bytes);
+    }
   }
 
   private async uniqueConflictPath(path: string): Promise<string> {
@@ -222,6 +239,18 @@ export class SyncEngine {
       if (!(await this.app.vault.adapter.exists(candidate))) return candidate;
     }
     throw new Error(`${path}: 一意な競合コピー名を作成できません`);
+  }
+}
+
+async function ensureIndexedParentFolders(app: App, path: string): Promise<void> {
+  const parts = normalizePath(path).split("/");
+  parts.pop();
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    const existing = app.vault.getAbstractFileByPath(current);
+    if (existing instanceof TFile) throw new Error(`${current}: 親パスに同名ファイルが存在します`);
+    if (!existing) await app.vault.createFolder(current);
   }
 }
 

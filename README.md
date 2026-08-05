@@ -20,6 +20,19 @@ WindowsとiPhoneのObsidian VaultをGoogle Drive経由で同期する、安全�
 
 iPhoneではアプリ終了中のバックグラウンド同期は行えません。起動中に手動同期を実行します。
 
+## iPhoneでGoogle DriveからVaultを復元
+
+iOS版ObsidianはGoogle Driveフォルダーを直接Vaultとしてマウントできません。本プラグインは、Drive上の暗号化バックアップをiPhone内のローカルVaultへ安全に復元します。
+
+1. Windows側で旧平文の暗号化移行を完了する。
+2. iPhoneのObsidianで空のローカルVaultを新規作成する。Vault名は任意。
+3. BRATで本プラグインを導入・有効化する。
+4. Windowsで作成した10分期限のGDVS2コードをiPhone側で読み込む。
+5. 設定の「Google DriveからこのVaultへ復元」から「復元内容をプレビュー」を押す。
+6. ダウンロード対象を確認し、「確認した内容を同期」を押す。
+
+復元専用モードはDriveだけにある暗号化ファイルをダウンロードし、iPhone側だけにあるファイルをアップロードしません。異なる内容の同名ファイルも上書きしません。復元された通常ファイルはObsidian Vault API経由で登録され、ファイル一覧へ即時反映されます。
+
 ## 開発
 
 ```powershell

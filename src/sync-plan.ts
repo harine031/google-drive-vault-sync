@@ -88,3 +88,36 @@ export function buildSyncPlan(
     return { kind: "conflict", path, local, remote, reason: "両方で変更または同期状態が不一致" };
   });
 }
+
+export function buildRestorePlan(
+  localFiles: LocalFileInfo[],
+  remoteFiles: RemoteFileInfo[]
+): SyncAction[] {
+  const localByPath = new Map(localFiles.map((file) => [file.path, file]));
+  const remoteByPath = new Map(remoteFiles.map((file) => [file.path, file]));
+  const paths = [...new Set([...localByPath.keys(), ...remoteByPath.keys()])].sort();
+
+  return paths.map((path): SyncAction => {
+    const local = localByPath.get(path);
+    const remote = remoteByPath.get(path);
+    if (remote && !remote.encrypted) {
+      return { kind: "skip", path, local, remote, reason: "旧平文です。先にWindowsで暗号化移行してください" };
+    }
+    if (remote?.excluded) {
+      return { kind: "skip", path, local, remote, reason: "安全ポリシーの除外対象（復元しません）" };
+    }
+    if (remote && !local) {
+      return { kind: "download", path, remote, reason: "Google Driveの暗号化バックアップからこのVaultへ復元" };
+    }
+    if (remote && local?.hash === remote.hash) {
+      return { kind: "noop", path, local, remote, reason: "このVaultに同じ内容が存在" };
+    }
+    if (remote && local) {
+      return { kind: "skip", path, local, remote, reason: "このVaultに異なる内容が存在するため復元では上書きしません" };
+    }
+    if (local && !remote) {
+      return { kind: "skip", path, local, reason: "このVaultだけに存在するため復元ではアップロードしません" };
+    }
+    return { kind: "skip", path, local, remote, reason: "ファイル情報が不完全" };
+  });
+}

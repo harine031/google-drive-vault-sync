@@ -134,6 +134,15 @@ export class GoogleDriveVaultSyncSettingTab extends PluginSettingTab {
           new Notice(error instanceof Error ? error.message : String(error), 10000);
         }
       }));
+
+    new Setting(containerEl)
+      .setName("Google DriveからこのVaultへ復元")
+      .setDesc("初回用。Driveだけにある暗号化ファイルをダウンロードし、ローカルの異なるファイルは上書きしません")
+      .addButton((button) => button
+        .setButtonText("復元内容をプレビュー")
+        .setCta()
+        .setDisabled(!this.plugin.hasRefreshToken())
+        .onClick(() => void this.plugin.previewRestore()));
   }
 }
 

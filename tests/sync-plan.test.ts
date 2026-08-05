@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSyncPlan } from "../src/sync-plan";
+import { buildRestorePlan, buildSyncPlan } from "../src/sync-plan";
 import type { LocalFileInfo, RemoteFileInfo, SyncStateData } from "../src/types";
 
 const local = (path: string, hash: string): LocalFileInfo => ({
@@ -70,6 +70,40 @@ describe("sync plan", () => {
     expect(buildSyncPlan([], [excluded], { records: {}, lastSyncAt: null })[0]).toMatchObject({
       kind: "skip",
       reason: expect.stringContaining("除外対象")
+    });
+  });
+});
+
+describe("restore plan", () => {
+  it("downloads only encrypted Drive-only files", () => {
+    const plan = buildRestorePlan(
+      [local("local-only.md", "local"), local("same.md", "same")],
+      [remote("remote-only.md", "remote"), remote("same.md", "same")]
+    );
+    expect(plan.find((action) => action.path === "remote-only.md")?.kind).toBe("download");
+    expect(plan.find((action) => action.path === "local-only.md")?.kind).toBe("skip");
+    expect(plan.find((action) => action.path === "same.md")?.kind).toBe("noop");
+  });
+
+  it("never overwrites differing local content or restores excluded files", () => {
+    const differing = remote("note.md", "remote");
+    const excluded = { ...remote(".obsidian/plugins/example/data.json", "secret"), excluded: true };
+    const plan = buildRestorePlan([local("note.md", "local")], [differing, excluded]);
+    expect(plan.find((action) => action.path === "note.md")).toMatchObject({
+      kind: "skip",
+      reason: expect.stringContaining("上書きしません")
+    });
+    expect(plan.find((action) => action.path === excluded.path)).toMatchObject({
+      kind: "skip",
+      reason: expect.stringContaining("除外対象")
+    });
+  });
+
+  it("blocks legacy plaintext until Windows migration completes", () => {
+    const legacy = { ...remote("legacy.md", "same"), encrypted: false, cipherHash: undefined, iv: undefined };
+    expect(buildRestorePlan([], [legacy])[0]).toMatchObject({
+      kind: "skip",
+      reason: expect.stringContaining("Windows")
     });
   });
 });

@@ -54,6 +54,11 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
       name: "同期内容を確認して実行",
       callback: () => void this.previewSync()
     });
+    this.addCommand({
+      id: "restore-vault-from-google-drive",
+      name: "Google DriveからこのVaultへ復元（初回用）",
+      callback: () => void this.previewRestore()
+    });
 
     if (this.settings.syncOnStartup) this.app.workspace.onLayoutReady(() => void this.previewSync());
   }
@@ -135,10 +140,17 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
     });
   }
 
-  async applySyncPlan(plan: SyncAction[]): Promise<void> {
+  async applySyncPlan(plan: SyncAction[], operationLabel = "同期"): Promise<void> {
     await this.withRunLock(async () => {
       const result = await this.syncEngine.apply(plan);
-      new Notice(`Google Drive暗号化同期完了: ${result.applied}件を反映しました`, 8000);
+      new Notice(`Google Drive暗号化${operationLabel}完了: ${result.applied}件を反映しました`, 8000);
+    });
+  }
+
+  async previewRestore(): Promise<void> {
+    await this.withRunLock(async () => {
+      const plan = await this.syncEngine.previewRestore();
+      new SyncPreviewModal(this, plan, "Google DriveからこのVaultへ安全に復元", "復元").open();
     });
   }
 
@@ -184,12 +196,17 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
 }
 
 class SyncPreviewModal extends Modal {
-  constructor(private readonly plugin: GoogleDriveVaultSyncPlugin, private readonly plan: SyncAction[]) {
+  constructor(
+    private readonly plugin: GoogleDriveVaultSyncPlugin,
+    private readonly plan: SyncAction[],
+    private readonly title = "Google Drive 暗号化同期プレビュー",
+    private readonly operationLabel = "同期"
+  ) {
     super(plugin.app);
   }
 
   onOpen(): void {
-    this.titleEl.setText("Google Drive 暗号化同期プレビュー");
+    this.titleEl.setText(this.title);
     const counts = new Map<string, number>();
     for (const action of this.plan) counts.set(action.kind, (counts.get(action.kind) ?? 0) + 1);
     this.contentEl.createEl("p", {
@@ -206,11 +223,11 @@ class SyncPreviewModal extends Modal {
     const closeButton = buttonRow.createEl("button", { text: "閉じる" });
     closeButton.addEventListener("click", () => this.close());
     const actionable = this.plan.some((action) => ["migrate", "upload", "download", "conflict"].includes(action.kind));
-    const syncButton = buttonRow.createEl("button", { text: "確認した内容を同期", cls: "mod-cta" });
+    const syncButton = buttonRow.createEl("button", { text: `確認した内容を${this.operationLabel}`, cls: "mod-cta" });
     syncButton.disabled = !actionable;
     syncButton.addEventListener("click", () => {
       this.close();
-      void this.plugin.applySyncPlan(this.plan);
+      void this.plugin.applySyncPlan(this.plan, this.operationLabel);
     });
   }
 
