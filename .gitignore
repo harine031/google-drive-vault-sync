@@ -1,0 +1,17 @@
+node_modules/
+main.js
+*.js.map
+coverage/
+.env
+data.json
+
+# Local agent/project integration files
+.agents/
+.claude/
+.codex/
+shared/
+AGENTS.md
+ANTIGRAVITY.md
+CLAUDE.md
+CODEX.md
+DEV_LOG.md

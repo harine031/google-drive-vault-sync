@@ -1,0 +1,12 @@
+.google-drive-vault-sync-summary {
+  white-space: pre-wrap;
+  max-height: 50vh;
+  overflow: auto;
+  padding: 0.75rem;
+  background: var(--background-secondary);
+  border-radius: var(--radius-s);
+}
+
+.google-drive-vault-sync-warning {
+  color: var(--text-warning);
+}

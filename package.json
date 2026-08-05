@@ -1,0 +1,28 @@
+{
+  "name": "google-drive-vault-sync",
+  "version": "0.1.1",
+  "description": "Safety-first Google Drive synchronization for Obsidian on Windows and iPhone",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "deploy:test": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-test.ps1"
+  },
+  "keywords": [
+    "obsidian",
+    "google-drive",
+    "sync"
+  ],
+  "author": "harine",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "latest",
+    "builtin-modules": "latest",
+    "esbuild": "latest",
+    "obsidian": "latest",
+    "tslib": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}
