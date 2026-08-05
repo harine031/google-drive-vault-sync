@@ -193,7 +193,7 @@ class SyncPreviewModal extends Modal {
     const counts = new Map<string, number>();
     for (const action of this.plan) counts.set(action.kind, (counts.get(action.kind) ?? 0) + 1);
     this.contentEl.createEl("p", {
-      text: `アップロード ${counts.get("upload") ?? 0} / ダウンロード ${counts.get("download") ?? 0} / 競合 ${counts.get("conflict") ?? 0} / 保留 ${counts.get("skip") ?? 0}`
+      text: `暗号化移行 ${counts.get("migrate") ?? 0} / アップロード ${counts.get("upload") ?? 0} / ダウンロード ${counts.get("download") ?? 0} / 競合 ${counts.get("conflict") ?? 0} / 保留 ${counts.get("skip") ?? 0}`
     });
     const details = this.contentEl.createEl("div", { cls: "google-drive-vault-sync-summary" });
     details.setText(this.plan
@@ -205,7 +205,7 @@ class SyncPreviewModal extends Modal {
     const buttonRow = this.contentEl.createDiv({ cls: "modal-button-container" });
     const closeButton = buttonRow.createEl("button", { text: "閉じる" });
     closeButton.addEventListener("click", () => this.close());
-    const actionable = this.plan.some((action) => ["upload", "download", "conflict"].includes(action.kind));
+    const actionable = this.plan.some((action) => ["migrate", "upload", "download", "conflict"].includes(action.kind));
     const syncButton = buttonRow.createEl("button", { text: "確認した内容を同期", cls: "mod-cta" });
     syncButton.disabled = !actionable;
     syncButton.addEventListener("click", () => {

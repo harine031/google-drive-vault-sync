@@ -20,16 +20,30 @@ export function buildSyncPlan(
     const record = state.records[path];
 
     if (remote && !remote.encrypted) {
-      if (local && local.hash === remote.hash) {
-        return { kind: "upload", path, local, remote, reason: "旧形式の平文Driveファイルを暗号化移行" };
+      const trustedByLocal = local?.hash === remote.hash;
+      const trustedByState = record?.remoteHash === remote.hash && record.remoteFileId === remote.id;
+      if (!trustedByLocal && !trustedByState) {
+        return {
+          kind: "skip",
+          path,
+          local,
+          remote,
+          reason: "旧平文ですが、信頼できるローカル原本または前回同期記録と一致しないため移行を保留"
+        };
       }
       return {
-        kind: "skip",
+        kind: "migrate",
         path,
         local,
         remote,
-        reason: "旧形式の平文Driveファイルです。内容が一致するWindowsローカル原本から暗号化移行してください"
+        reason: remote.excluded
+          ? "旧平文を信頼済みhashで検証・暗号化し、以後は安全ポリシーで除外"
+          : "旧平文をローカル原本または前回同期記録で検証して暗号化移行"
       };
+    }
+
+    if (remote?.excluded) {
+      return { kind: "skip", path, local, remote, reason: "安全ポリシーの除外対象（DriveからVaultへは同期しません）" };
     }
 
     if (local && !remote) {

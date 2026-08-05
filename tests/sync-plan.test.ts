@@ -49,12 +49,27 @@ describe("sync plan", () => {
     expect(plan[0].kind).toBe("skip");
   });
 
-  it("migrates matching plaintext files and blocks unsafe legacy downloads", () => {
+  it("migrates plaintext files trusted by a local copy or previous sync state", () => {
     const legacy = { ...remote("note.md", "same"), encrypted: false, cipherHash: undefined, iv: undefined };
     expect(buildSyncPlan([local("note.md", "same")], [legacy], { records: {}, lastSyncAt: null })[0]).toMatchObject({
-      kind: "upload",
+      kind: "migrate",
       reason: expect.stringContaining("暗号化移行")
     });
-    expect(buildSyncPlan([], [legacy], { records: {}, lastSyncAt: null })[0]).toMatchObject({ kind: "skip" });
+    expect(buildSyncPlan([], [legacy], {
+      records: { "note.md": { localHash: "old", remoteHash: "same", remoteFileId: legacy.id } },
+      lastSyncAt: null
+    })[0]).toMatchObject({ kind: "migrate" });
+    expect(buildSyncPlan([], [legacy], { records: {}, lastSyncAt: null })[0]).toMatchObject({
+      kind: "skip",
+      reason: expect.stringContaining("信頼できる")
+    });
+  });
+
+  it("keeps excluded remote files out of normal sync after migration", () => {
+    const excluded = { ...remote(".obsidian/plugins/example/data.json", "same"), excluded: true };
+    expect(buildSyncPlan([], [excluded], { records: {}, lastSyncAt: null })[0]).toMatchObject({
+      kind: "skip",
+      reason: expect.stringContaining("除外対象")
+    });
   });
 });

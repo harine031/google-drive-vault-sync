@@ -8,6 +8,16 @@ export interface EncryptedVaultFile {
   cipherHash: string;
 }
 
+export async function verifyLegacyVaultFile(
+  bytes: ArrayBuffer,
+  expectedSize: number,
+  expectedHash: string,
+  path: string
+): Promise<void> {
+  if (bytes.byteLength !== expectedSize) throw new Error(`${path}: Driveのファイルサイズが取得前後で一致しません`);
+  if (await sha256Hex(bytes) !== expectedHash) throw new Error(`${path}: 旧形式DriveファイルのSHA-256が一致しません`);
+}
+
 export async function encryptVaultFile(
   plaintext: ArrayBuffer,
   encodedKey: string,

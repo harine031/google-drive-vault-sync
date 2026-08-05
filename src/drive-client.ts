@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import { decryptVaultFile, encryptVaultFile, FILE_ENCRYPTION_FORMAT } from "./file-crypto";
+import { decryptVaultFile, encryptVaultFile, FILE_ENCRYPTION_FORMAT, verifyLegacyVaultFile } from "./file-crypto";
 import { assertNoPathCollisions, isSafeVaultPath } from "./path-policy";
 import { MAX_FILE_SIZE_BYTES, type RemoteFileInfo } from "./types";
 
@@ -74,6 +74,17 @@ export class GoogleDriveClient {
       remote.cipherHash,
       remote.hash
     );
+  }
+
+  async downloadLegacyVerified(remote: RemoteFileInfo): Promise<ArrayBuffer> {
+    if (remote.encrypted) throw new Error(`${remote.path}: 暗号化済みファイルは旧形式移行できません`);
+    assertAllowedSize(remote.size);
+    const response = await this.request(`${API}/files/${encodeURIComponent(remote.id)}?alt=media`, "GET");
+    ensureSuccess(response.status, "旧形式ファイルの安全な取得");
+    const bytes = response.arrayBuffer;
+    assertAllowedSize(bytes.byteLength);
+    await verifyLegacyVaultFile(bytes, remote.size, remote.hash, remote.path);
+    return bytes;
   }
 
   async uploadEncrypted(

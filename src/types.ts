@@ -50,9 +50,10 @@ export interface RemoteFileInfo {
   encrypted: boolean;
   cipherHash?: string;
   iv?: string;
+  excluded?: boolean;
 }
 
-export type SyncActionKind = "upload" | "download" | "conflict" | "noop" | "skip";
+export type SyncActionKind = "migrate" | "upload" | "download" | "conflict" | "noop" | "skip";
 
 export interface SyncAction {
   kind: SyncActionKind;

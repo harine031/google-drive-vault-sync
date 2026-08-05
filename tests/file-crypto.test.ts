@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomBase64Url, sha256Hex } from "../src/crypto-utils";
-import { decryptVaultFile, encryptVaultFile } from "../src/file-crypto";
+import { decryptVaultFile, encryptVaultFile, verifyLegacyVaultFile } from "../src/file-crypto";
 
 describe("vault file encryption", () => {
   it("round-trips and verifies ciphertext and plaintext hashes", async () => {
@@ -45,5 +45,13 @@ describe("vault file encryption", () => {
       encrypted.cipherHash,
       plainHash
     )).rejects.toThrow("認証");
+  });
+
+  it("verifies legacy plaintext before in-place encryption migration", async () => {
+    const plaintext = new TextEncoder().encode("legacy note").buffer;
+    const hash = await sha256Hex(plaintext);
+    await expect(verifyLegacyVaultFile(plaintext, plaintext.byteLength, hash, "note.md")).resolves.toBeUndefined();
+    await expect(verifyLegacyVaultFile(plaintext, plaintext.byteLength + 1, hash, "note.md")).rejects.toThrow("サイズ");
+    await expect(verifyLegacyVaultFile(plaintext, plaintext.byteLength, "0".repeat(64), "note.md")).rejects.toThrow("SHA-256");
   });
 });

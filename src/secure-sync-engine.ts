@@ -33,7 +33,8 @@ export class SyncEngine {
   ) {}
 
   async preview(): Promise<SyncAction[]> {
-    const [local, remote] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
+    const [local, remoteFiles] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
+    const remote = this.applyRemotePolicy(remoteFiles);
     return buildSyncPlan(local, remote, this.state);
   }
 
@@ -41,7 +42,27 @@ export class SyncEngine {
     await this.assertRemotePlanUnchanged(plan);
     let applied = 0;
     for (const action of plan) {
-      if (action.kind === "upload" && action.local) {
+      if (action.kind === "migrate" && action.remote) {
+        await this.assertRemoteActionUnchanged(action);
+        const bytes = await this.drive.downloadLegacyVerified(action.remote);
+        const uploaded = await this.drive.uploadEncrypted(
+          action.path,
+          bytes,
+          action.remote.mimeType,
+          action.remote.hash,
+          action.remote.id
+        );
+        if (action.local?.hash === action.remote.hash && !action.remote.excluded) {
+          this.state.records[action.path] = {
+            localHash: action.local.hash,
+            remoteHash: uploaded.hash,
+            remoteFileId: uploaded.id
+          };
+        } else {
+          delete this.state.records[action.path];
+        }
+        applied += 1;
+      } else if (action.kind === "upload" && action.local) {
         await this.assertRemoteActionUnchanged(action);
         const bytes = await this.readLocalVerified(action.local);
         const uploaded = await this.drive.uploadEncrypted(
@@ -93,6 +114,18 @@ export class SyncEngine {
     this.state.lastSyncAt = new Date().toISOString();
     await this.persist();
     return { plan, applied };
+  }
+
+  private applyRemotePolicy(files: RemoteFileInfo[]): RemoteFileInfo[] {
+    return files.map((file) => ({
+      ...file,
+      excluded: isPathExcluded(
+        file.path,
+        this.settings.includeObsidianConfig,
+        this.settings.excludePatterns,
+        this.app.vault.configDir
+      )
+    }));
   }
 
   private async scanLocalFiles(): Promise<LocalFileInfo[]> {
