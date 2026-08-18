@@ -4,7 +4,7 @@ WindowsとiPhoneのObsidian VaultをGoogle Drive経由で同期する、安全�
 
 ## 現在の段階
 
-`0.2.0` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
+`0.2.1` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
 
 - Google公式OAuthエンドポイントへ直接接続（PKCE＋loopback）
 - `drive.file` スコープのみ使用
@@ -71,7 +71,7 @@ npm run deploy:test -- -VaultPath "C:\path\to\test-vault"
 
 ## 0.1.xからの安全な移行
 
-1. Windows側を先に0.2.0へ更新し、Obsidianを再起動する。
+1. Windows側を先に0.2.xへ更新し、Obsidianを再起動する。
 2. Windowsで同期プレビューを開く。旧平文ファイルは「暗号化移行」として表示される。
 3. 内容を確認して同期を実行し、Drive上のファイル本文を暗号化形式へ置き換える。
 4. Windowsで新しいGDVS2コードを作成し、iPhone側へ読み込む。旧GDVS1コードは使用できない。

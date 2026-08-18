@@ -43,7 +43,10 @@ export async function createPairingCode(
 export async function readPairingCode(code: string, passphrase: string, now = Date.now()): Promise<PairingPayload> {
   validatePassphrase(passphrase);
   if (code.length > MAX_CODE_LENGTH) throw new Error("ペアリングコードが大きすぎます");
-  const parts = code.trim().split(".");
+  // Text areas and messaging apps can insert line wrapping or invisible format
+  // characters into a long pasted value. They are not part of the GDVS2 alphabet.
+  const normalizedCode = code.replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, "");
+  const parts = normalizedCode.split(".");
   if (parts.length !== 4 || parts[0] !== PREFIX) {
     throw new Error("GDVS2ペアリングコードを使用してください");
   }
