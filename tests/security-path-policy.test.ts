@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertNoCrossSidePathCollisions,
   assertNoPathCollisions,
   isPathExcluded,
   isSafeVaultPath,
@@ -47,5 +48,11 @@ describe("security path policy", () => {
     expect(() => assertNoPathCollisions(["Notes/A.md", "Notes/A.md"])).toThrow("衝突");
     expect(() => assertNoPathCollisions(["Notes/A.md", "notes/a.md"])).toThrow("衝突");
     expect(() => assertNoPathCollisions(["Notes/é.md", "Notes/é.md"])).toThrow("衝突");
+  });
+
+  it("rejects collisions across local and Drive while allowing the same exact path", () => {
+    expect(() => assertNoCrossSidePathCollisions(["Notes/A.md"], ["Notes/A.md"])).not.toThrow();
+    expect(() => assertNoCrossSidePathCollisions(["Notes/A.md"], ["notes/a.md"])).toThrow("衝突");
+    expect(() => assertNoCrossSidePathCollisions(["Notes/é.md"], ["Notes/é.md"])).toThrow("衝突");
   });
 });

@@ -137,17 +137,29 @@ export class GoogleDriveClient {
   }
 
   private async ensureVaultFolder(): Promise<string> {
+    const desiredName = validateFolderName(this.folderName());
     const query = `trashed = false and mimeType = '${FOLDER_MIME}' and appProperties has { key='vaultId' and value='${escapeQuery(this.vaultId())}' } and appProperties has { key='kind' and value='vaultRoot' }`;
-    const params = new URLSearchParams({ q: query, spaces: "drive", pageSize: "1", fields: "files(id)" });
+    const params = new URLSearchParams({ q: query, spaces: "drive", pageSize: "1", fields: "files(id,name)" });
     const search = await this.request(`${API}/files?${params.toString()}`, "GET");
     ensureSuccess(search.status, "同期フォルダーの検索");
     const existing = (search.json as DriveListResponse).files?.[0];
-    if (existing) return existing.id;
+    if (existing) {
+      if (existing.name !== desiredName) {
+        const rename = await this.request(
+          `${API}/files/${encodeURIComponent(existing.id)}?fields=id,name`,
+          "PATCH",
+          JSON.stringify({ name: desiredName }),
+          { "Content-Type": "application/json" }
+        );
+        ensureSuccess(rename.status, "同期フォルダー名の更新");
+      }
+      return existing.id;
+    }
     const create = await this.request(
       `${API}/files?fields=id`,
       "POST",
       JSON.stringify({
-        name: this.folderName(),
+        name: desiredName,
         mimeType: FOLDER_MIME,
         appProperties: { vaultId: this.vaultId(), kind: "vaultRoot" }
       }),
@@ -167,6 +179,14 @@ export class GoogleDriveClient {
       throw: false
     });
   }
+}
+
+export function validateFolderName(value: string): string {
+  const name = value.trim();
+  if (!name || name.length > 255 || /[\u0000-\u001F]/.test(name)) {
+    throw new Error("Driveフォルダー名は1〜255文字で指定してください");
+  }
+  return name;
 }
 
 function parseRemoteFile(file: DriveFileResource): RemoteFileInfo {

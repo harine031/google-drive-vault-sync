@@ -2,6 +2,7 @@ import { App, normalizePath, TFile, TFolder } from "obsidian";
 import { sha256Hex } from "./crypto-utils";
 import { GoogleDriveClient } from "./drive-client";
 import {
+  assertNoCrossSidePathCollisions,
   assertNoPathCollisions,
   isPathExcluded,
   isSafeVaultPath,
@@ -35,16 +36,22 @@ export class SyncEngine {
   async preview(): Promise<SyncAction[]> {
     const [local, remoteFiles] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
     const remote = this.applyRemotePolicy(remoteFiles);
+    assertNoCrossSidePathCollisions(local.map((file) => file.path), remote.map((file) => file.path));
     return buildSyncPlan(local, remote, this.state);
   }
 
   async previewRestore(): Promise<SyncAction[]> {
     const [local, remoteFiles] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
-    return buildRestorePlan(local, this.applyRemotePolicy(remoteFiles));
+    const remote = this.applyRemotePolicy(remoteFiles);
+    assertNoCrossSidePathCollisions(local.map((file) => file.path), remote.map((file) => file.path));
+    return buildRestorePlan(local, remote);
   }
 
   async apply(plan: SyncAction[]): Promise<SyncResult> {
-    await this.assertRemotePlanUnchanged(plan);
+    await Promise.all([
+      this.assertRemotePlanUnchanged(plan),
+      this.assertLocalPlanUnchanged(plan)
+    ]);
     let applied = 0;
     for (const action of plan) {
       if (action.kind === "migrate" && action.remote) {
@@ -200,6 +207,21 @@ export class SyncEngine {
     if (current.length !== planned.length) throw new Error("プレビュー後にDriveのファイル一覧が変わりました。再プレビューしてください");
     const currentByPath = new Map(current.map((file) => [file.path, file]));
     for (const expected of planned) assertRemoteMatches(expected, currentByPath.get(expected.path));
+  }
+
+  private async assertLocalPlanUnchanged(plan: SyncAction[]): Promise<void> {
+    const current = await this.scanLocalFiles();
+    const planned = plan.filter((action) => action.local).map((action) => action.local as LocalFileInfo);
+    if (current.length !== planned.length) {
+      throw new Error("プレビュー後にローカルのファイル一覧が変わりました。再プレビューしてください");
+    }
+    const currentByPath = new Map(current.map((file) => [file.path, file]));
+    for (const expected of planned) {
+      const found = currentByPath.get(expected.path);
+      if (!found || found.hash !== expected.hash || found.size !== expected.size || found.mimeType !== expected.mimeType) {
+        throw new Error(`${expected.path}: プレビュー後にローカル内容が変わりました。再プレビューしてください`);
+      }
+    }
   }
 
   private async assertRemoteActionUnchanged(action: SyncAction): Promise<void> {

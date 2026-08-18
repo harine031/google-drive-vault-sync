@@ -106,7 +106,8 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
       clientSecret: this.getClientSecret(),
       refreshToken: this.getRefreshToken(),
       vaultId: this.settings.vaultId,
-      vaultKey: this.getVaultKey()
+      vaultKey: this.getVaultKey(),
+      remoteFolderName: this.settings.remoteFolderName
     };
   }
 
@@ -121,6 +122,7 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
     this.app.secretStorage.setSecret(this.settings.refreshTokenId, payload.refreshToken);
     this.app.secretStorage.setSecret(this.settings.vaultKeyId, payload.vaultKey);
     this.settings.vaultId = payload.vaultId;
+    this.settings.remoteFolderName = payload.remoteFolderName;
     this.auth.disconnect();
     await this.persistData();
   }
@@ -183,6 +185,10 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
     this.syncState.records = data?.syncState?.records ?? {};
     this.consumedPairingIds = (data?.consumedPairingIds ?? []).filter((id) => /^[A-Za-z0-9_-]{22}$/.test(id)).slice(-32);
     let migrated = false;
+    if (!raw.remoteFolderName || raw.remoteFolderName === DEFAULT_SETTINGS.remoteFolderName) {
+      this.settings.remoteFolderName = `Obsidian Vault Sync - ${this.app.vault.getName()}`;
+      migrated = true;
+    }
     if (clientSecret && !this.getClientSecret()) {
       this.app.secretStorage.setSecret(this.settings.clientSecretId, clientSecret);
       migrated = true;

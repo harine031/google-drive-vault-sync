@@ -43,6 +43,12 @@ export function assertNoPathCollisions(paths: string[]): void {
   }
 }
 
+export function assertNoCrossSidePathCollisions(localPaths: string[], remotePaths: string[]): void {
+  assertNoPathCollisions(localPaths);
+  assertNoPathCollisions(remotePaths);
+  assertNoPathCollisions([...new Set([...localPaths, ...remotePaths])]);
+}
+
 function globToRegExp(glob: string): RegExp {
   let source = "";
   for (let index = 0; index < glob.length; index += 1) {

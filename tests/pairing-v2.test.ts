@@ -8,7 +8,8 @@ const payload = {
   clientSecret: "client-secret-value",
   refreshToken: "refresh-token-value",
   vaultId: "vault-id",
-  vaultKey
+  vaultKey,
+  remoteFolderName: "Obsidian Vault Sync - MySyncVault"
 };
 
 describe("device pairing v2", () => {

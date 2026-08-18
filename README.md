@@ -17,6 +17,7 @@ WindowsとiPhoneのObsidian VaultをGoogle Drive経由で同期する、安全�
 - 両側変更時は競合コピーを作成
 - 削除は検出のみで、自動反映しない
 - 600,000回PBKDF2とAES-GCMによる10分期限のGDVS2ペアリングコード（同一端末での再利用も拒否）
+- 同期フォルダー名は既定で `Obsidian Vault Sync - <Vault名>` とし、Windows・iPhone間で同じ名前を引き継ぐ
 
 iPhoneではアプリ終了中のバックグラウンド同期は行えません。起動中に手動同期を実行します。
 

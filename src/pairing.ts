@@ -8,6 +8,7 @@ export interface PairingPayload {
   refreshToken: string;
   vaultId: string;
   vaultKey: string;
+  remoteFolderName: string;
   pairingId: string;
   issuedAt: number;
   expiresAt: number;
@@ -106,8 +107,11 @@ function validatePassphrase(passphrase: string): void {
 }
 
 function validatePayload(payload: Partial<PairingPayload>): void {
-  for (const value of [payload.clientId, payload.clientSecret, payload.refreshToken, payload.vaultId, payload.vaultKey]) {
+  for (const value of [payload.clientId, payload.clientSecret, payload.refreshToken, payload.vaultId, payload.vaultKey, payload.remoteFolderName]) {
     if (typeof value !== "string" || !value || value.length > 8192) throw new Error("ペアリングデータが不完全です");
+  }
+  if ((payload.remoteFolderName as string).length > 255 || /[\u0000-\u001F]/.test(payload.remoteFolderName as string)) {
+    throw new Error("同期フォルダー名が正しくありません");
   }
   validateVaultKey(payload.vaultKey as string);
 }
