@@ -80,6 +80,9 @@ export class GoogleAuth {
       throw new Error(`Google OAuth更新に失敗しました (${response.status})`);
     }
     const token = response.json as TokenResponse;
+    if (!token.access_token || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
+      throw new Error("Google OAuth更新レスポンスが不完全です");
+    }
     this.accessToken = {
       value: token.access_token,
       expiresAt: Date.now() + token.expires_in * 1000
@@ -104,15 +107,16 @@ export class GoogleAuth {
     const state = randomUrlSafeString(32);
     const result = await new Promise<DesktopAuthResult>((resolve, reject) => {
       let redirectUri = "";
+      let timeoutId = 0;
       const server = http.createServer((request, response) => {
+        const callbackUrl = new URL(request.url ?? "/", redirectUri);
+        if (callbackUrl.pathname !== "/oauth2callback") {
+          response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+          response.end("Not found");
+          return;
+        }
         void (async () => {
           try {
-            const callbackUrl = new URL(request.url ?? "/", redirectUri);
-            if (callbackUrl.pathname !== "/oauth2callback") {
-              response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-              response.end("Not found");
-              return;
-            }
             if (callbackUrl.searchParams.get("state") !== state) {
               throw new Error("OAuth stateが一致しません");
             }
@@ -136,6 +140,7 @@ export class GoogleAuth {
             );
             reject(new Error(message));
           } finally {
+            if (timeoutId) window.clearTimeout(timeoutId);
             server.close();
           }
         })();
@@ -162,7 +167,7 @@ export class GoogleAuth {
         }).toString();
         window.open(authorizeUrl.toString(), "_blank", "noopener,noreferrer");
       });
-      window.setTimeout(() => {
+      timeoutId = window.setTimeout(() => {
         server.close();
         reject(new Error("Google OAuthが3分以内に完了しませんでした"));
       }, 180_000);
@@ -177,6 +182,24 @@ export class GoogleAuth {
 
   disconnect(): void {
     this.accessToken = null;
+  }
+
+  async revokeAndDisconnect(): Promise<void> {
+    const refreshToken = this.getRefreshToken().trim();
+    if (refreshToken) {
+      const response = await requestUrl({
+        url: "https://oauth2.googleapis.com/revoke",
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: refreshToken }).toString(),
+        throw: false
+      });
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Google OAuth権限の取消に失敗しました (${response.status})`);
+      }
+    }
+    this.accessToken = null;
+    await this.onRefreshToken("");
   }
 }
 
@@ -210,7 +233,11 @@ async function exchangeCode(
       (description ? ` — ${description}` : "")
     );
   }
-  return response.json as TokenResponse;
+  const token = response.json as TokenResponse;
+  if (!token.access_token || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
+    throw new Error("Google OAuth tokenレスポンスが不完全です");
+  }
+  return token;
 }
 
 function randomUrlSafeString(byteLength: number): string {

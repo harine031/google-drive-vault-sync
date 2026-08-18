@@ -1,13 +1,24 @@
+export const CLIENT_SECRET_ID = "google-drive-vault-sync-client-secret";
+export const REFRESH_TOKEN_ID = "google-drive-vault-sync-refresh-token";
+export const VAULT_KEY_ID = "google-drive-vault-sync-vault-key";
+export const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+
 export interface PluginSettings {
   clientId: string;
-  clientSecret: string;
-  refreshToken: string;
+  clientSecretId: string;
+  refreshTokenId: string;
+  vaultKeyId: string;
   vaultId: string;
   remoteFolderName: string;
   includeObsidianConfig: boolean;
   excludePatterns: string[];
-  dryRunByDefault: boolean;
   syncOnStartup: boolean;
+}
+
+export interface LegacyPluginSettings extends Partial<PluginSettings> {
+  clientSecret?: string;
+  refreshToken?: string;
+  dryRunByDefault?: boolean;
 }
 
 export interface SyncRecord {
@@ -36,9 +47,13 @@ export interface RemoteFileInfo {
   size: number;
   mimeType: string;
   modifiedTime: string;
+  encrypted: boolean;
+  cipherHash?: string;
+  iv?: string;
+  excluded?: boolean;
 }
 
-export type SyncActionKind = "upload" | "download" | "conflict" | "noop" | "skip";
+export type SyncActionKind = "migrate" | "upload" | "download" | "conflict" | "noop" | "skip";
 
 export interface SyncAction {
   kind: SyncActionKind;
@@ -51,25 +66,18 @@ export interface SyncAction {
 export interface PersistedPluginData {
   settings: PluginSettings;
   syncState: SyncStateData;
+  consumedPairingIds: string[];
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   clientId: "",
-  clientSecret: "",
-  refreshToken: "",
+  clientSecretId: CLIENT_SECRET_ID,
+  refreshTokenId: REFRESH_TOKEN_ID,
+  vaultKeyId: VAULT_KEY_ID,
   vaultId: crypto.randomUUID(),
   remoteFolderName: "Obsidian Vault Sync",
-  includeObsidianConfig: true,
-  excludePatterns: [
-    ".trash/**",
-    ".git/**",
-    ".DS_Store",
-    ".obsidian/workspace.json",
-    ".obsidian/workspace-mobile.json",
-    ".obsidian/cache/**",
-    ".obsidian/plugins/google-drive-vault-sync/**"
-  ],
-  dryRunByDefault: true,
+  includeObsidianConfig: false,
+  excludePatterns: [".trash/**", ".git/**", ".DS_Store"],
   syncOnStartup: false
 };
 
