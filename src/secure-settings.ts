@@ -158,10 +158,15 @@ class ExportPairingModal extends Modal {
     password.style.width = "100%";
     password.style.marginBottom = "12px";
     password.setAttribute("autocomplete", "new-password");
+    password.setAttribute("autocapitalize", "none");
+    password.setAttribute("autocorrect", "off");
+    password.spellcheck = false;
     const output = this.contentEl.createEl("textarea", { placeholder: "ここにGDVS2暗号化コードが表示されます" });
     output.readOnly = true;
     output.rows = 6;
+    output.wrap = "off";
     output.style.width = "100%";
+    output.style.overflowX = "auto";
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     const generate = buttons.createEl("button", { text: "作成してコピー", cls: "mod-cta" });
     const clear = buttons.createEl("button", { text: "コードとクリップボードを消去" });
@@ -205,9 +210,17 @@ class ImportPairingModal extends Modal {
     this.titleEl.setText("GDVS2ペアリングコードを読み込む");
     const code = this.contentEl.createEl("textarea", { placeholder: "GDVS2. で始まる10分以内のコード" });
     code.rows = 6;
+    code.wrap = "off";
     code.style.width = "100%";
+    code.style.overflowX = "auto";
+    code.setAttribute("autocapitalize", "none");
+    code.setAttribute("autocorrect", "off");
+    code.spellcheck = false;
     const password = this.contentEl.createEl("input", { type: "password", placeholder: "16文字以上のパスフレーズ" });
     password.style.width = "100%";
+    password.setAttribute("autocapitalize", "none");
+    password.setAttribute("autocorrect", "off");
+    password.spellcheck = false;
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     const apply = buttons.createEl("button", { text: "この端末へ安全に設定", cls: "mod-cta" });
     apply.addEventListener("click", () => {

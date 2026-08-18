@@ -32,6 +32,18 @@ describe("device pairing v2", () => {
     await expect(createPairingCode(payload, "short password")).rejects.toThrow("16文字以上");
   });
 
+  it("accepts transport whitespace and invisible formatting characters in a pasted code", async () => {
+    const passphrase = "correct horse battery staple";
+    const code = await createPairingCode(payload, passphrase);
+    const wrappedCode = code.replace(/(.{40})/g, "$1\n\u200B ");
+
+    await expect(readPairingCode(wrappedCode, passphrase)).resolves.toMatchObject({
+      version: 2,
+      vaultId: payload.vaultId,
+      remoteFolderName: payload.remoteFolderName
+    });
+  });
+
   it("rejects expired and legacy codes", async () => {
     const now = Date.UTC(2026, 7, 5, 0, 0, 0);
     const code = await createPairingCode(payload, "correct horse battery staple", now);
