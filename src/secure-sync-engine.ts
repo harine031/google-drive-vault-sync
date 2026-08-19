@@ -70,6 +70,17 @@ export class SyncEngine {
             remoteHash: uploaded.hash,
             remoteFileId: uploaded.id
           };
+        } else if (!action.local && !action.remote.excluded) {
+          const previous = this.state.records[action.path];
+          if (previous?.remoteHash === action.remote.hash && previous.remoteFileId === action.remote.id) {
+            this.state.records[action.path] = {
+              localHash: previous.localHash,
+              remoteHash: uploaded.hash,
+              remoteFileId: uploaded.id
+            };
+          } else {
+            delete this.state.records[action.path];
+          }
         } else {
           delete this.state.records[action.path];
         }
@@ -101,6 +112,30 @@ export class SyncEngine {
           remoteFileId: action.remote.id
         };
         applied += 1;
+      } else if (action.kind === "mark-delete" && action.remote) {
+        await this.assertRemoteActionUnchanged(action);
+        await this.drive.downloadVerified(action.remote);
+        const deleted = await this.drive.markDeleted(action.remote);
+        if (!deleted.deletedAt) throw new Error(`${action.path}: Drive削除履歴の登録結果が不完全です`);
+        this.state.records[action.path] = {
+          localHash: deleted.hash,
+          remoteHash: deleted.hash,
+          remoteFileId: deleted.id,
+          deletedAt: deleted.deletedAt
+        };
+        applied += 1;
+      } else if (action.kind === "delete-local" && action.local && action.remote?.deletedAt) {
+        await this.assertRemoteActionUnchanged(action);
+        await this.assertLocalUnchanged(action.local, action.path);
+        await this.drive.downloadVerified(action.remote);
+        await this.trashLocal(action.path);
+        this.state.records[action.path] = {
+          localHash: action.local.hash,
+          remoteHash: action.remote.hash,
+          remoteFileId: action.remote.id,
+          deletedAt: action.remote.deletedAt
+        };
+        applied += 1;
       } else if (action.kind === "conflict" && action.local && action.remote) {
         await this.assertRemoteActionUnchanged(action);
         await this.assertLocalUnchanged(action.local, action.path);
@@ -118,8 +153,16 @@ export class SyncEngine {
         this.state.records[action.path] = {
           localHash: action.local.hash,
           remoteHash: action.remote.hash,
-          remoteFileId: action.remote.id
+          remoteFileId: action.remote.id,
+          deletedAt: action.remote.deletedAt
         };
+      } else if (action.kind === "noop" && !action.local && action.remote?.deletedAt) {
+        const record = this.state.records[action.path];
+        if (record?.remoteFileId === action.remote.id && record.remoteHash === action.remote.hash) {
+          record.deletedAt = action.remote.deletedAt;
+        }
+      } else if (action.kind === "mark-delete" || action.kind === "delete-local") {
+        throw new Error(`${action.path}: 削除同期計画が不完全です。再プレビューしてください`);
       }
       await this.persist();
     }
@@ -253,6 +296,37 @@ export class SyncEngine {
     }
   }
 
+  private async trashLocal(path: string): Promise<void> {
+    if (!isSafeVaultPath(path)) throw new Error(`${path}: 削除対象パスが安全ではありません`);
+    const normalized = normalizePath(path);
+    const existing = this.app.vault.getAbstractFileByPath(normalized);
+    if (existing instanceof TFolder) throw new Error(`${path}: 削除対象に同名フォルダーが存在します`);
+    const backupPath = await this.uniqueDeletedBackupPath(normalized);
+    await ensureParentFolders(this.app, backupPath);
+    if (existing instanceof TFile) {
+      await this.app.vault.rename(existing, backupPath);
+      return;
+    }
+    if (normalized === this.app.vault.configDir || normalized.startsWith(`${this.app.vault.configDir}/`)) {
+      if (!(await this.app.vault.adapter.exists(normalized))) {
+        throw new Error(`${path}: 削除対象ファイルが見つかりません`);
+      }
+      await this.app.vault.adapter.rename(normalized, backupPath);
+      return;
+    }
+    throw new Error(`${path}: Obsidianが管理する削除対象ファイルを確認できません`);
+  }
+
+  private async uniqueDeletedBackupPath(path: string): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const marker = new Date().toISOString().replace(/[-:.]/g, "");
+      const suffix = crypto.randomUUID().slice(0, 8);
+      const candidate = normalizePath(`.trash/google-drive-vault-sync/${marker}-${suffix}/${path}`);
+      if (!(await this.app.vault.adapter.exists(candidate))) return candidate;
+    }
+    throw new Error(`${path}: 一意な削除バックアップ先を作成できません`);
+  }
+
   private async uniqueConflictPath(path: string): Promise<string> {
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const marker = new Date().toISOString().replace(/[-:.]/g, "");
@@ -283,7 +357,8 @@ function assertRemoteMatches(expected: RemoteFileInfo, current: RemoteFileInfo |
       current.modifiedTime !== expected.modifiedTime ||
       current.encrypted !== expected.encrypted ||
       current.cipherHash !== expected.cipherHash ||
-      current.iv !== expected.iv) {
+      current.iv !== expected.iv ||
+      current.deletedAt !== expected.deletedAt) {
     throw new Error(`${expected.path}: プレビュー後にDrive内容が変わりました。再プレビューしてください`);
   }
 }

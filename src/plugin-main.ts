@@ -216,20 +216,25 @@ class SyncPreviewModal extends Modal {
     const counts = new Map<string, number>();
     for (const action of this.plan) counts.set(action.kind, (counts.get(action.kind) ?? 0) + 1);
     this.contentEl.createEl("p", {
-      text: `暗号化移行 ${counts.get("migrate") ?? 0} / アップロード ${counts.get("upload") ?? 0} / ダウンロード ${counts.get("download") ?? 0} / 競合 ${counts.get("conflict") ?? 0} / 保留 ${counts.get("skip") ?? 0}`
+      text: `暗号化移行 ${counts.get("migrate") ?? 0} / アップロード ${counts.get("upload") ?? 0} / ダウンロード ${counts.get("download") ?? 0} / Drive削除登録 ${counts.get("mark-delete") ?? 0} / ローカル削除 ${counts.get("delete-local") ?? 0} / 競合 ${counts.get("conflict") ?? 0} / 保留 ${counts.get("skip") ?? 0}`
     });
     const details = this.contentEl.createEl("div", { cls: "google-drive-vault-sync-summary" });
     details.setText(this.plan
       .filter((action) => action.kind !== "noop")
       .map((action) => `[${action.kind}] ${action.path} — ${action.reason}`)
       .join("\n") || "変更はありません");
-    this.contentEl.createEl("p", { text: "実行直前にローカルとDriveのhashを再確認し、変更があれば中止します。" });
+    this.contentEl.createEl("p", { text: "実行直前にローカルとDriveのhashを再確認し、変更があれば中止します。削除反映対象は復旧可能なプラグイン専用ごみ箱へ移動します。" });
 
     const buttonRow = this.contentEl.createDiv({ cls: "modal-button-container" });
     const closeButton = buttonRow.createEl("button", { text: "閉じる" });
     closeButton.addEventListener("click", () => this.close());
-    const actionable = this.plan.some((action) => ["migrate", "upload", "download", "conflict"].includes(action.kind));
-    const syncButton = buttonRow.createEl("button", { text: `確認した内容を${this.operationLabel}`, cls: "mod-cta" });
+    const actionableKinds = ["migrate", "upload", "download", "mark-delete", "delete-local", "conflict"];
+    const actionable = this.plan.some((action) => actionableKinds.includes(action.kind));
+    const includesDeletion = this.plan.some((action) => ["mark-delete", "delete-local"].includes(action.kind));
+    const syncButton = buttonRow.createEl("button", {
+      text: includesDeletion ? `削除を含む内容を${this.operationLabel}` : `確認した内容を${this.operationLabel}`,
+      cls: includesDeletion ? "mod-warning" : "mod-cta"
+    });
     syncButton.disabled = !actionable;
     syncButton.addEventListener("click", () => {
       this.close();

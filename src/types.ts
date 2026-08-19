@@ -25,6 +25,7 @@ export interface SyncRecord {
   localHash: string;
   remoteHash: string;
   remoteFileId: string;
+  deletedAt?: string;
   lastConflictPair?: string;
 }
 
@@ -50,10 +51,11 @@ export interface RemoteFileInfo {
   encrypted: boolean;
   cipherHash?: string;
   iv?: string;
+  deletedAt?: string;
   excluded?: boolean;
 }
 
-export type SyncActionKind = "migrate" | "upload" | "download" | "conflict" | "noop" | "skip";
+export type SyncActionKind = "migrate" | "upload" | "download" | "mark-delete" | "delete-local" | "conflict" | "noop" | "skip";
 
 export interface SyncAction {
   kind: SyncActionKind;

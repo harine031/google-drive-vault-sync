@@ -1,4 +1,5 @@
 import { requestUrl } from "obsidian";
+import { createDeletionAuth, DELETION_FORMAT, verifyDeletionAuth } from "./deletion-tombstone";
 import { decryptVaultFile, encryptVaultFile, FILE_ENCRYPTION_FORMAT, verifyLegacyVaultFile } from "./file-crypto";
 import { assertNoPathCollisions, isSafeVaultPath } from "./path-policy";
 import { MAX_FILE_SIZE_BYTES, type RemoteFileInfo } from "./types";
@@ -50,7 +51,9 @@ export class GoogleDriveClient {
       const response = await this.request(`${API}/files?${params.toString()}`, "GET");
       ensureSuccess(response.status, "Driveファイル一覧の取得");
       const data = response.json as DriveListResponse;
-      for (const file of data.files ?? []) files.push(parseRemoteFile(file));
+      for (const file of data.files ?? []) {
+        files.push(await parseRemoteFile(file, this.vaultId(), this.getVaultKey()));
+      }
       pageToken = data.nextPageToken ?? "";
     } while (pageToken);
     assertNoPathCollisions(files.map((file) => file.path));
@@ -109,7 +112,10 @@ export class GoogleDriveClient {
         cipherSha256: encrypted.cipherHash,
         encryption: FILE_ENCRYPTION_FORMAT,
         iv: encrypted.iv,
-        originalMimeType: mimeType
+        originalMimeType: mimeType,
+        deletedAt: null,
+        deletion: null,
+        deletionAuth: null
       }
     };
     if (!existingFileId) metadata.parents = [folderId];
@@ -134,6 +140,37 @@ export class GoogleDriveClient {
       cipherHash: encrypted.cipherHash,
       iv: encrypted.iv
     };
+  }
+
+  async markDeleted(remote: RemoteFileInfo): Promise<RemoteFileInfo> {
+    if (!remote.encrypted) throw new Error(`${remote.path}: 平文の旧形式は削除同期できません`);
+    if (!remote.cipherHash || !remote.iv) throw new Error(`${remote.path}: Drive暗号メタデータが不完全です`);
+    if (remote.deletedAt) throw new Error(`${remote.path}: Drive削除履歴は登録済みです`);
+    const deletedAt = new Date().toISOString();
+    const deletionAuth = await createDeletionAuth(this.getVaultKey(), {
+      vaultId: this.vaultId(),
+      fileId: remote.id,
+      path: remote.path,
+      hash: remote.hash,
+      cipherHash: remote.cipherHash,
+      iv: remote.iv,
+      size: remote.size,
+      deletedAt
+    });
+    const response = await this.request(
+      `${API}/files/${encodeURIComponent(remote.id)}?fields=id,name,mimeType,modifiedTime,size,appProperties`,
+      "PATCH",
+      JSON.stringify({
+        appProperties: {
+          deletedAt,
+          deletion: DELETION_FORMAT,
+          deletionAuth
+        }
+      }),
+      { "Content-Type": "application/json" }
+    );
+    ensureSuccess(response.status, "Drive削除履歴の登録");
+    return parseRemoteFile(response.json as DriveFileResource, this.vaultId(), this.getVaultKey());
   }
 
   private async ensureVaultFolder(): Promise<string> {
@@ -189,7 +226,7 @@ export function validateFolderName(value: string): string {
   return name;
 }
 
-function parseRemoteFile(file: DriveFileResource): RemoteFileInfo {
+async function parseRemoteFile(file: DriveFileResource, vaultId: string, vaultKey: string): Promise<RemoteFileInfo> {
   const properties = file.appProperties ?? {};
   const path = properties.path;
   const hash = properties.sha256;
@@ -202,6 +239,25 @@ function parseRemoteFile(file: DriveFileResource): RemoteFileInfo {
   if (encrypted && (!properties.cipherSha256 || !SHA256_PATTERN.test(properties.cipherSha256) || !properties.iv)) {
     throw new Error(`${path}: Drive暗号メタデータが不完全です`);
   }
+  const deletionValues = [properties.deletedAt, properties.deletion, properties.deletionAuth].filter(Boolean);
+  let deletedAt: string | undefined;
+  if (deletionValues.length > 0) {
+    deletedAt = properties.deletedAt;
+    if (!deletedAt || properties.deletion !== DELETION_FORMAT || !properties.deletionAuth || !isIsoTimestamp(deletedAt)) {
+      throw new Error(`${path}: Drive削除履歴が不完全です`);
+    }
+    const authenticated = await verifyDeletionAuth(vaultKey, {
+      vaultId,
+      fileId: file.id,
+      path,
+      hash,
+      cipherHash: properties.cipherSha256 as string,
+      iv: properties.iv as string,
+      size,
+      deletedAt
+    }, properties.deletionAuth);
+    if (!authenticated) throw new Error(`${path}: Drive削除履歴の認証に失敗しました`);
+  }
   assertAllowedSize(size, encrypted ? 16 : 0);
   return {
     id: file.id,
@@ -212,8 +268,14 @@ function parseRemoteFile(file: DriveFileResource): RemoteFileInfo {
     modifiedTime: file.modifiedTime ?? "",
     encrypted,
     cipherHash: properties.cipherSha256,
-    iv: properties.iv
+    iv: properties.iv,
+    deletedAt
   };
+}
+
+function isIsoTimestamp(value: string): boolean {
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
 function assertAllowedSize(size: number, encryptionOverhead = 0): void {
