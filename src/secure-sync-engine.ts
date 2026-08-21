@@ -24,6 +24,25 @@ export interface SyncResult {
   applied: number;
 }
 
+export interface SyncProgress {
+  phase: "validating" | "applying" | "complete";
+  completed: number;
+  total: number;
+  applied: number;
+  current?: SyncAction;
+}
+
+export type SyncProgressCallback = (progress: SyncProgress) => void;
+
+const ACTIONABLE_KINDS = new Set<SyncAction["kind"]>([
+  "migrate",
+  "upload",
+  "download",
+  "mark-delete",
+  "delete-local",
+  "conflict"
+]);
+
 export class SyncEngine {
   constructor(
     private readonly app: App,
@@ -47,13 +66,19 @@ export class SyncEngine {
     return buildRestorePlan(local, remote);
   }
 
-  async apply(plan: SyncAction[]): Promise<SyncResult> {
+  async apply(plan: SyncAction[], onProgress?: SyncProgressCallback): Promise<SyncResult> {
+    const total = plan.filter((action) => ACTIONABLE_KINDS.has(action.kind)).length;
+    let completed = 0;
+    emitProgress(onProgress, { phase: "validating", completed, total, applied: 0 });
     await Promise.all([
       this.assertRemotePlanUnchanged(plan),
       this.assertLocalPlanUnchanged(plan)
     ]);
     let applied = 0;
+    emitProgress(onProgress, { phase: "applying", completed, total, applied });
     for (const action of plan) {
+      const actionable = ACTIONABLE_KINDS.has(action.kind);
+      if (actionable) emitProgress(onProgress, { phase: "applying", completed, total, applied, current: action });
       if (action.kind === "migrate" && action.remote) {
         await this.assertRemoteActionUnchanged(action);
         const bytes = await this.drive.downloadLegacyVerified(action.remote);
@@ -165,9 +190,14 @@ export class SyncEngine {
         throw new Error(`${action.path}: 削除同期計画が不完全です。再プレビューしてください`);
       }
       await this.persist();
+      if (actionable) {
+        completed += 1;
+        emitProgress(onProgress, { phase: "applying", completed, total, applied });
+      }
     }
     this.state.lastSyncAt = new Date().toISOString();
     await this.persist();
+    emitProgress(onProgress, { phase: "complete", completed, total, applied });
     return { plan, applied };
   }
 
@@ -335,6 +365,14 @@ export class SyncEngine {
       if (!(await this.app.vault.adapter.exists(candidate))) return candidate;
     }
     throw new Error(`${path}: 一意な競合コピー名を作成できません`);
+  }
+}
+
+function emitProgress(callback: SyncProgressCallback | undefined, progress: SyncProgress): void {
+  try {
+    callback?.(progress);
+  } catch {
+    // Progress UI failures must never interrupt a verified sync operation.
   }
 }
 

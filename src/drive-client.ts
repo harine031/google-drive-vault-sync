@@ -1,4 +1,4 @@
-import { requestUrl } from "obsidian";
+import { requestUrl, type RequestUrlResponse } from "obsidian";
 import { createDeletionAuth, DELETION_FORMAT, verifyDeletionAuth } from "./deletion-tombstone";
 import { decryptVaultFile, encryptVaultFile, FILE_ENCRYPTION_FORMAT, verifyLegacyVaultFile } from "./file-crypto";
 import { assertNoPathCollisions, isSafeVaultPath } from "./path-policy";
@@ -22,6 +22,9 @@ const API = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const DRIVE_PROPERTY_MAX_BYTES = 124;
+const PATH_PART_COUNT_KEY = "pathParts";
+const MAX_PATH_PARTS = 10;
 
 export class GoogleDriveClient {
   constructor(
@@ -49,7 +52,7 @@ export class GoogleDriveClient {
       });
       if (pageToken) params.set("pageToken", pageToken);
       const response = await this.request(`${API}/files?${params.toString()}`, "GET");
-      ensureSuccess(response.status, "Driveファイル一覧の取得");
+      ensureSuccess(response, "Driveファイル一覧の取得");
       const data = response.json as DriveListResponse;
       for (const file of data.files ?? []) {
         files.push(await parseRemoteFile(file, this.vaultId(), this.getVaultKey()));
@@ -66,7 +69,7 @@ export class GoogleDriveClient {
     }
     assertAllowedSize(remote.size, 16);
     const response = await this.request(`${API}/files/${encodeURIComponent(remote.id)}?alt=media`, "GET");
-    ensureSuccess(response.status, "ファイルのダウンロード");
+    ensureSuccess(response, "ファイルのダウンロード");
     assertAllowedSize(response.arrayBuffer.byteLength, 16);
     return decryptVaultFile(
       response.arrayBuffer,
@@ -83,7 +86,7 @@ export class GoogleDriveClient {
     if (remote.encrypted) throw new Error(`${remote.path}: 暗号化済みファイルは旧形式移行できません`);
     assertAllowedSize(remote.size);
     const response = await this.request(`${API}/files/${encodeURIComponent(remote.id)}?alt=media`, "GET");
-    ensureSuccess(response.status, "旧形式ファイルの安全な取得");
+    ensureSuccess(response, "旧形式ファイルの安全な取得");
     const bytes = response.arrayBuffer;
     assertAllowedSize(bytes.byteLength);
     await verifyLegacyVaultFile(bytes, remote.size, remote.hash, remote.path);
@@ -98,6 +101,7 @@ export class GoogleDriveClient {
     existingFileId?: string
   ): Promise<RemoteFileInfo> {
     assertAllowedSize(bytes.byteLength);
+    if (!isSafeVaultPath(path)) throw new Error(`${path}: アップロード対象のパスが安全ではありません`);
     if (!SHA256_PATTERN.test(sha256)) throw new Error(`${path}: SHA-256形式が正しくありません`);
     const encrypted = await encryptVaultFile(bytes, this.getVaultKey(), this.vaultId(), path);
     const folderId = await this.ensureVaultFolder();
@@ -107,7 +111,7 @@ export class GoogleDriveClient {
       appProperties: {
         vaultId: this.vaultId(),
         kind: "vaultFile",
-        path,
+        ...encodeDrivePathProperties(path),
         sha256,
         cipherSha256: encrypted.cipherHash,
         encryption: FILE_ENCRYPTION_FORMAT,
@@ -127,7 +131,7 @@ export class GoogleDriveClient {
     const response = await this.request(url, existingFileId ? "PATCH" : "POST", body, {
       "Content-Type": `multipart/related; boundary=${boundary}`
     });
-    ensureSuccess(response.status, "ファイルの暗号化アップロード");
+    ensureSuccess(response, "ファイルの暗号化アップロード");
     const file = response.json as DriveFileResource;
     return {
       id: file.id,
@@ -169,7 +173,7 @@ export class GoogleDriveClient {
       }),
       { "Content-Type": "application/json" }
     );
-    ensureSuccess(response.status, "Drive削除履歴の登録");
+    ensureSuccess(response, "Drive削除履歴の登録");
     return parseRemoteFile(response.json as DriveFileResource, this.vaultId(), this.getVaultKey());
   }
 
@@ -178,7 +182,7 @@ export class GoogleDriveClient {
     const query = `trashed = false and mimeType = '${FOLDER_MIME}' and appProperties has { key='vaultId' and value='${escapeQuery(this.vaultId())}' } and appProperties has { key='kind' and value='vaultRoot' }`;
     const params = new URLSearchParams({ q: query, spaces: "drive", pageSize: "1", fields: "files(id,name)" });
     const search = await this.request(`${API}/files?${params.toString()}`, "GET");
-    ensureSuccess(search.status, "同期フォルダーの検索");
+    ensureSuccess(search, "同期フォルダーの検索");
     const existing = (search.json as DriveListResponse).files?.[0];
     if (existing) {
       if (existing.name !== desiredName) {
@@ -188,7 +192,7 @@ export class GoogleDriveClient {
           JSON.stringify({ name: desiredName }),
           { "Content-Type": "application/json" }
         );
-        ensureSuccess(rename.status, "同期フォルダー名の更新");
+        ensureSuccess(rename, "同期フォルダー名の更新");
       }
       return existing.id;
     }
@@ -202,7 +206,7 @@ export class GoogleDriveClient {
       }),
       { "Content-Type": "application/json" }
     );
-    ensureSuccess(create.status, "同期フォルダーの作成");
+    ensureSuccess(create, "同期フォルダーの作成");
     return (create.json as DriveFileResource).id;
   }
 
@@ -228,7 +232,7 @@ export function validateFolderName(value: string): string {
 
 async function parseRemoteFile(file: DriveFileResource, vaultId: string, vaultKey: string): Promise<RemoteFileInfo> {
   const properties = file.appProperties ?? {};
-  const path = properties.path;
+  const path = decodeDrivePathProperties(properties);
   const hash = properties.sha256;
   if (!path || !isSafeVaultPath(path)) throw new Error(`${path || file.name}: Drive上のパスが安全ではありません`);
   if (!hash || !SHA256_PATTERN.test(hash)) throw new Error(`${path}: Drive上のSHA-256が正しくありません`);
@@ -284,8 +288,87 @@ function assertAllowedSize(size: number, encryptionOverhead = 0): void {
   }
 }
 
-function ensureSuccess(status: number, operation: string): void {
-  if (status < 200 || status >= 300) throw new Error(`${operation}に失敗しました (${status})`);
+function ensureSuccess(response: RequestUrlResponse, operation: string): void {
+  if (response.status >= 200 && response.status < 300) return;
+  const reason = driveErrorReason(response);
+  throw new Error(`${operation}に失敗しました (${response.status}${reason ? `: ${reason}` : ""})`);
+}
+
+export function encodeDrivePathProperties(path: string): Record<string, string | null> {
+  if (drivePropertyBytes("path", path) <= DRIVE_PROPERTY_MAX_BYTES) return { path };
+  const chunks: string[] = [];
+  let chunk = "";
+  for (const character of path) {
+    const key = `path${chunks.length}`;
+    if (drivePropertyBytes(key, character) > DRIVE_PROPERTY_MAX_BYTES) {
+      throw new Error(`${path}: Driveパスの1文字がカスタムプロパティ上限を超えています`);
+    }
+    if (chunk && drivePropertyBytes(key, chunk + character) > DRIVE_PROPERTY_MAX_BYTES) {
+      chunks.push(chunk);
+      chunk = character;
+    } else {
+      chunk += character;
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  if (chunks.length < 2 || chunks.length > MAX_PATH_PARTS) {
+    throw new Error(`${path}: Driveパスを安全な個数へ分割できません`);
+  }
+  const result: Record<string, string | null> = { path: null, [PATH_PART_COUNT_KEY]: String(chunks.length) };
+  chunks.forEach((value, index) => {
+    result[`path${index}`] = value;
+  });
+  return result;
+}
+
+export function decodeDrivePathProperties(properties: Record<string, string>): string | undefined {
+  const direct = properties.path;
+  const countValue = properties[PATH_PART_COUNT_KEY];
+  if (direct && countValue) throw new Error("Drive上のパス情報が重複しています");
+  if (direct) {
+    if (drivePropertyBytes("path", direct) > DRIVE_PROPERTY_MAX_BYTES) {
+      throw new Error("Drive上のパス情報がカスタムプロパティ上限を超えています");
+    }
+    return direct;
+  }
+  if (!countValue) return undefined;
+  if (!/^[1-9][0-9]?$/.test(countValue)) throw new Error("Drive上の分割パス件数が正しくありません");
+  const count = Number(countValue);
+  if (count < 2 || count > MAX_PATH_PARTS) throw new Error("Drive上の分割パス件数が範囲外です");
+  const unexpected = Object.keys(properties).find((key) => {
+    const match = /^path([0-9]+)$/.exec(key);
+    return match ? Number(match[1]) >= count : false;
+  });
+  if (unexpected) throw new Error("Drive上の分割パスに余分な要素があります");
+  let path = "";
+  for (let index = 0; index < count; index += 1) {
+    const key = `path${index}`;
+    const value = properties[key];
+    if (!value || drivePropertyBytes(key, value) > DRIVE_PROPERTY_MAX_BYTES) {
+      throw new Error("Drive上の分割パスが不完全です");
+    }
+    path += value;
+  }
+  return path;
+}
+
+function drivePropertyBytes(key: string, value: string): number {
+  return new TextEncoder().encode(key + value).byteLength;
+}
+
+function driveErrorReason(response: RequestUrlResponse): string {
+  type DriveErrorBody = { error?: { status?: unknown; errors?: Array<{ reason?: unknown }> } };
+  let body: DriveErrorBody;
+  try {
+    body = response.json as DriveErrorBody;
+  } catch {
+    return "";
+  }
+  const candidates = [body?.error?.errors?.[0]?.reason, body?.error?.status];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(candidate)) return candidate;
+  }
+  return "";
 }
 
 function escapeQuery(value: string): string {
