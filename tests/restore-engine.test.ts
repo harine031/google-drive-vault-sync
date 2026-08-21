@@ -16,7 +16,7 @@ vi.mock("obsidian", () => ({
   TFolder: MockTFolder
 }));
 
-import { SyncEngine } from "../src/secure-sync-engine";
+import { SyncEngine, type SyncProgress } from "../src/secure-sync-engine";
 import { sha256Hex } from "../src/crypto-utils";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE, type RemoteFileInfo, type SyncStateData } from "../src/types";
 
@@ -111,6 +111,54 @@ describe("restore engine Obsidian indexing", () => {
 
     await expect(engine.apply(plan)).rejects.toThrow("B.md");
     expect(uploadEncrypted).not.toHaveBeenCalled();
+  });
+
+  it("reports validation, per-file progress, and completion without letting UI errors stop sync", async () => {
+    const bytes = new TextEncoder().encode("progress").buffer;
+    const hash = await sha256Hex(bytes);
+    const adapter = {
+      list: vi.fn(async () => ({ files: ["note.md"], folders: [] })),
+      stat: vi.fn(async () => ({ type: "file", size: bytes.byteLength })),
+      readBinary: vi.fn(async () => bytes),
+      exists: vi.fn(async () => true)
+    };
+    const uploaded: RemoteFileInfo = {
+      id: "id-note",
+      path: "note.md",
+      hash,
+      size: bytes.byteLength + 16,
+      mimeType: "text/markdown",
+      modifiedTime: "2026-08-21T00:00:00.000Z",
+      encrypted: true,
+      cipherHash: "b".repeat(64),
+      iv: "AAAAAAAAAAAAAAAA"
+    };
+    const drive = {
+      listVaultFiles: vi.fn(async () => []),
+      uploadEncrypted: vi.fn(async () => uploaded)
+    };
+    const engine = new SyncEngine(
+      { vault: { configDir: ".obsidian", adapter } } as never,
+      structuredClone(DEFAULT_SETTINGS),
+      structuredClone(DEFAULT_SYNC_STATE),
+      drive as never,
+      async () => undefined
+    );
+    const local = { path: "note.md", hash, size: bytes.byteLength, mimeType: "text/markdown" };
+    const progress: SyncProgress[] = [];
+
+    const result = await engine.apply(
+      [{ kind: "upload", path: "note.md", local, reason: "test" }],
+      (value) => {
+        progress.push(value);
+        if (value.current) throw new Error("progress renderer failed");
+      }
+    );
+
+    expect(result.applied).toBe(1);
+    expect(progress[0]).toMatchObject({ phase: "validating", completed: 0, total: 1 });
+    expect(progress.some((value) => value.current?.path === "note.md")).toBe(true);
+    expect(progress.at(-1)).toMatchObject({ phase: "complete", completed: 1, total: 1, applied: 1 });
   });
 
   it("marks a verified Drive file as deleted when the local copy was removed", async () => {

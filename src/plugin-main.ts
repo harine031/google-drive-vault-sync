@@ -4,7 +4,7 @@ import { randomBase64Url } from "./crypto-utils";
 import { GoogleDriveClient } from "./drive-client";
 import type { PairingPayload } from "./pairing";
 import { GoogleDriveVaultSyncSettingTab } from "./secure-settings";
-import { SyncEngine } from "./secure-sync-engine";
+import { SyncEngine, type SyncProgress } from "./secure-sync-engine";
 import {
   DEFAULT_SETTINGS,
   DEFAULT_SYNC_STATE,
@@ -144,8 +144,16 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
 
   async applySyncPlan(plan: SyncAction[], operationLabel = "同期"): Promise<void> {
     await this.withRunLock(async () => {
-      const result = await this.syncEngine.apply(plan);
-      new Notice(`Google Drive暗号化${operationLabel}完了: ${result.applied}件を反映しました`, 8000);
+      const progressModal = new SyncProgressModal(this, operationLabel);
+      progressModal.open();
+      try {
+        const result = await this.syncEngine.apply(plan, (progress) => progressModal.update(progress));
+        progressModal.complete(result.applied);
+        new Notice(`Google Drive暗号化${operationLabel}完了: ${result.applied}件を反映しました`, 8000);
+      } catch (error) {
+        progressModal.fail(error);
+        throw error;
+      }
     });
   }
 
@@ -245,4 +253,96 @@ class SyncPreviewModal extends Modal {
   onClose(): void {
     this.contentEl.empty();
   }
+}
+
+class SyncProgressModal extends Modal {
+  private statusEl!: HTMLElement;
+  private countEl!: HTMLElement;
+  private currentEl!: HTMLElement;
+  private progressEl!: HTMLProgressElement;
+  private closeButton!: HTMLButtonElement;
+  private latest: SyncProgress | null = null;
+
+  constructor(
+    plugin: GoogleDriveVaultSyncPlugin,
+    private readonly operationLabel: string
+  ) {
+    super(plugin.app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(`Google Drive 暗号化${this.operationLabel}の進捗`);
+    this.statusEl = this.contentEl.createEl("p", { text: "同期開始を準備しています…" });
+    this.progressEl = this.contentEl.createEl("progress", { cls: "google-drive-vault-sync-progress" });
+    this.progressEl.max = 1;
+    this.progressEl.removeAttribute("value");
+    this.progressEl.setAttribute("aria-label", `${this.operationLabel}進捗`);
+    this.countEl = this.contentEl.createEl("p", { text: "0 / 0件" });
+    this.currentEl = this.contentEl.createEl("p", { cls: "google-drive-vault-sync-current", text: "" });
+    this.contentEl.createEl("p", {
+      cls: "google-drive-vault-sync-progress-note",
+      text: "処理済みの項目は1件ごとに安全に記録されます。途中で画面を閉じても同期処理は継続します。"
+    });
+    const buttonRow = this.contentEl.createDiv({ cls: "modal-button-container" });
+    this.closeButton = buttonRow.createEl("button", { text: "処理中…" });
+    this.closeButton.disabled = true;
+    this.closeButton.addEventListener("click", () => this.close());
+  }
+
+  update(progress: SyncProgress): void {
+    this.latest = progress;
+    this.progressEl.max = Math.max(progress.total, 1);
+    if (progress.phase === "validating") {
+      this.progressEl.removeAttribute("value");
+      this.statusEl.setText("ローカルとGoogle Driveの内容を事前検証しています…");
+      this.countEl.setText(`検証中 / 実行予定 ${progress.total}件`);
+      this.currentEl.setText("");
+      return;
+    }
+    this.progressEl.value = progress.total === 0 ? 1 : progress.completed;
+    this.countEl.setText(`${progress.completed} / ${progress.total}件完了（反映 ${progress.applied}件）`);
+    if (progress.phase === "complete") {
+      this.statusEl.setText(`Google Drive暗号化${this.operationLabel}が完了しました`);
+      this.currentEl.setText("");
+      this.closeButton.disabled = false;
+      this.closeButton.setText("閉じる");
+      return;
+    }
+    this.statusEl.setText(`Google Drive暗号化${this.operationLabel}を実行しています…`);
+    this.currentEl.setText(progress.current
+      ? `${actionLabel(progress.current.kind)}: ${progress.current.path}`
+      : "次の処理を準備しています…");
+  }
+
+  complete(applied: number): void {
+    const total = this.latest?.total ?? applied;
+    this.update({ phase: "complete", completed: total, total, applied });
+  }
+
+  fail(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.statusEl.setText(`Google Drive暗号化${this.operationLabel}を完了できませんでした`);
+    this.statusEl.addClass("google-drive-vault-sync-warning");
+    this.currentEl.setText(message);
+    this.closeButton.disabled = false;
+    this.closeButton.setText("閉じる");
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+function actionLabel(kind: SyncAction["kind"]): string {
+  const labels: Record<SyncAction["kind"], string> = {
+    migrate: "暗号化移行",
+    upload: "アップロード",
+    download: "ダウンロード",
+    "mark-delete": "Drive削除登録",
+    "delete-local": "ローカル削除",
+    conflict: "競合コピー",
+    noop: "変更なし",
+    skip: "保留"
+  };
+  return labels[kind];
 }
