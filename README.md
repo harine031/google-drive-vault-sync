@@ -4,7 +4,7 @@ WindowsとiPhoneのObsidian VaultをGoogle Drive経由で同期する、安全�
 
 ## 現在の段階
 
-`0.3.1` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
+`0.3.2` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
 
 - Google公式OAuthエンドポイントへ直接接続（PKCE＋loopback）
 - `drive.file` スコープのみ使用
@@ -40,7 +40,7 @@ iOS版ObsidianはGoogle Driveフォルダーを直接Vaultとしてマウント�
 ## 編集と削除の同期
 
 - 片方だけが編集された場合は、前回同期時のhashを基準にアップロードまたはダウンロードします。
-- 両端末で編集された場合は上書きせず、Drive版を`.conflict-<日時>-<識別子>`としてローカルへ退避します。
+- 両端末で編集された場合は上書きせず、Drive版を`.conflict-<日時>-<識別子>`としてVault直下へ退避します。
 - 前回同期済みのファイルを削除すると、Vault鍵からHKDFで分離した専用鍵でHMAC認証した削除履歴をDriveへ登録します。他端末は自身の前回同期記録と一致する未変更ファイルだけを`.trash/google-drive-vault-sync/`へ移動します。
 - 削除と編集が競合した場合、同期記録がない場合、または削除履歴の認証に失敗した場合は自動削除しません。
 - Drive上の暗号文は復元用に保持し、削除履歴付きのファイルとして新規Vaultへは復元しません。

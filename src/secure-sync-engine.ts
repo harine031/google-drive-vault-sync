@@ -417,11 +417,10 @@ async function ensureParentFolders(app: App, path: string): Promise<void> {
   }
 }
 
-function conflictPath(path: string, marker: string): string {
+export function conflictPath(path: string, marker: string): string {
   const slash = path.lastIndexOf("/");
-  const directory = slash >= 0 ? path.slice(0, slash + 1) : "";
   const name = slash >= 0 ? path.slice(slash + 1) : path;
   const dot = name.lastIndexOf(".");
-  if (dot <= 0) return `${directory}${name}.conflict-${marker}`;
-  return `${directory}${name.slice(0, dot)}.conflict-${marker}${name.slice(dot)}`;
+  if (dot <= 0) return `${name}.conflict-${marker}`;
+  return `${name.slice(0, dot)}.conflict-${marker}${name.slice(dot)}`;
 }

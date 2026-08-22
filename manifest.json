@@ -1,7 +1,7 @@
 {
   "id": "google-drive-vault-sync",
   "name": "Google Drive Vault Sync",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "minAppVersion": "1.11.4",
   "description": "Encrypted, safety-first Google Drive synchronization for Windows and iPhone.",
   "author": "harine",
