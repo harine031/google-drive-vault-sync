@@ -4,7 +4,7 @@ WindowsとiPhoneのObsidian VaultをGoogle Drive経由で同期する、安全�
 
 ## 現在の段階
 
-`0.3.1` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
+`0.3.2` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
 
 - Google公式OAuthエンドポイントへ直接接続（PKCE＋loopback）
 - `drive.file` スコープのみ使用
