@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Google Drive Vault Syncは、WindowsとiPhoneのObsidian Vaultを暗号化して同期するコミュニティプラグインです。">
+  <title>Google Drive Vault Sync</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="./">Google Drive Vault Sync</a><nav aria-label="主要ナビゲーション"><a href="#features">機能</a><a href="privacy.html">プライバシー</a><a href="terms.html">利用規約</a></nav></header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Obsidian community plugin</p>
+      <h1>Vaultを暗号化して、<br>WindowsとiPhoneの間で同期。</h1>
+      <p class="lead">Google Drive Vault Syncは、ユーザー自身のGoogle Driveを利用する安全性重視のObsidianプラグインです。専用の運営サーバーを経由せず、ファイル本文を端末上で暗号化してから保存します。</p>
+      <div class="actions"><a class="button primary" href="https://github.com/harine031/google-drive-vault-sync">GitHubで見る</a><a class="button secondary" href="privacy.html">データの扱いを確認</a></div>
+    </section>
+    <section id="features" class="section" aria-labelledby="features-title">
+      <p class="section-label">What it does</p><h2 id="features-title">同期の安全策</h2>
+      <div class="grid">
+        <article class="card"><span class="number">01</span><h3>端末上で暗号化</h3><p>Vault内の対象ファイルをAES-256-GCMで暗号化してからGoogle Driveへアップロードします。</p></article>
+        <article class="card"><span class="number">02</span><h3>限定されたアクセス</h3><p>Google OAuthの<code>drive.file</code>スコープを使い、アプリが作成または選択したファイルだけを扱います。</p></article>
+        <article class="card"><span class="number">03</span><h3>確認してから同期</h3><p>変更内容をプレビューし、競合コピーや削除履歴を使って意図しない上書き・削除を避けます。</p></article>
+      </div>
+    </section>
+    <section class="section split"><div><p class="section-label">Data flow</p><h2>データの流れはシンプルです</h2></div><ol class="steps"><li><strong>Obsidianで同期を開始</strong><span>ユーザー操作によって同期対象を確認します。</span></li><li><strong>端末内で暗号化</strong><span>平文ファイルは運営者のサーバーへ送信されません。</span></li><li><strong>ユーザーのDriveへ保存</strong><span>暗号化データはユーザー自身のGoogle Drive内に保持されます。</span></li></ol></section>
+    <section class="notice"><div><p class="section-label">Beta software</p><h2>大切なVaultにはバックアップを。</h2></div><p>本プラグインはベータ版です。使用前に独立したバックアップを作成し、同期プレビューを確認してください。</p></section>
+  </main>
+  <footer><p>Google Drive Vault Sync is an independent community project and is not affiliated with Google or Obsidian.</p><div><a href="privacy.html">プライバシーポリシー</a><a href="terms.html">利用規約</a><a href="https://github.com/harine031/google-drive-vault-sync/issues">お問い合わせ</a></div></footer>
+</body>
+</html>
