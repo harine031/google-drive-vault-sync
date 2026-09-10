@@ -18,7 +18,13 @@ vi.mock("obsidian", () => ({
 
 import { SyncEngine, type SyncProgress } from "../src/secure-sync-engine";
 import { sha256Hex } from "../src/crypto-utils";
-import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE, type RemoteFileInfo, type SyncStateData } from "../src/types";
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_SYNC_STATE,
+  MAX_FILE_SIZE_BYTES,
+  type RemoteFileInfo,
+  type SyncStateData
+} from "../src/types";
 
 describe("restore engine Obsidian indexing", () => {
   let entries: Map<string, InstanceType<typeof MockTFile> | InstanceType<typeof MockTFolder>>;
@@ -111,6 +117,73 @@ describe("restore engine Obsidian indexing", () => {
 
     await expect(engine.apply(plan)).rejects.toThrow("B.md");
     expect(uploadEncrypted).not.toHaveBeenCalled();
+  });
+
+  it("skips an oversized local file while uploading the remaining files", async () => {
+    const smallBytes = new TextEncoder().encode("small note").buffer;
+    const smallHash = await sha256Hex(smallBytes);
+    const adapter = {
+      list: vi.fn(async () => ({ files: ["large.zip", "small.md"], folders: [] })),
+      stat: vi.fn(async (path: string) => ({
+        type: "file",
+        size: path === "large.zip" ? MAX_FILE_SIZE_BYTES + 1 : smallBytes.byteLength
+      })),
+      readBinary: vi.fn(async (path: string) => {
+        if (path === "large.zip") throw new Error("oversized file must not be read");
+        return smallBytes;
+      }),
+      exists: vi.fn(async () => true)
+    };
+    const uploaded: RemoteFileInfo = {
+      id: "id-small",
+      path: "small.md",
+      hash: smallHash,
+      size: smallBytes.byteLength + 16,
+      mimeType: "text/markdown",
+      modifiedTime: "2026-09-11T00:00:00.000Z",
+      encrypted: true,
+      cipherHash: "b".repeat(64),
+      iv: "AAAAAAAAAAAAAAAA"
+    };
+    const drive = {
+      listVaultFiles: vi.fn(async () => []),
+      uploadEncrypted: vi.fn(async () => uploaded)
+    };
+    const state = structuredClone(DEFAULT_SYNC_STATE);
+    const persist = vi.fn(async () => undefined);
+    const engine = new SyncEngine(
+      { vault: { configDir: ".obsidian", adapter } } as never,
+      structuredClone(DEFAULT_SETTINGS),
+      state,
+      drive as never,
+      persist
+    );
+
+    const plan = await engine.preview();
+    expect(plan).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "skip", path: "large.zip", reason: expect.stringContaining("100 MiB") }),
+      expect.objectContaining({ kind: "upload", path: "small.md" })
+    ]));
+    expect(plan.find((action) => action.path === "large.zip")?.silent).toBe(false);
+    expect(state.reportedOversizedPaths).toEqual(["large.zip"]);
+    expect(persist).toHaveBeenCalledTimes(1);
+
+    const nextPlan = await engine.preview();
+    expect(nextPlan.find((action) => action.path === "large.zip")?.silent).toBe(true);
+    expect(persist).toHaveBeenCalledTimes(1);
+
+    const result = await engine.apply(plan);
+
+    expect(result.applied).toBe(1);
+    expect(drive.uploadEncrypted).toHaveBeenCalledTimes(1);
+    expect(drive.uploadEncrypted).toHaveBeenCalledWith(
+      "small.md",
+      smallBytes,
+      "text/markdown",
+      smallHash,
+      undefined
+    );
+    expect(adapter.readBinary).not.toHaveBeenCalledWith("large.zip");
   });
 
   it("reports validation, per-file progress, and completion without letting UI errors stop sync", async () => {

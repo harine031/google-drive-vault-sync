@@ -4,7 +4,7 @@ WindowsとiPhoneのObsidian VaultをGoogle Drive経由で同期する、安全�
 
 ## 現在の段階
 
-`0.3.2` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
+`0.3.3` はWindows・iPhone向けセキュリティ強化ベータ版です。Obsidian `1.11.4` 以上が必要です。
 
 - Google公式OAuthエンドポイントへ直接接続（PKCE＋loopback）
 - `drive.file` スコープのみ使用
@@ -93,7 +93,7 @@ npm run deploy:test -- -VaultPath "C:\path\to\test-vault"
 ## セキュリティ上の境界
 
 - Drive上のファイル本文は暗号化されますが、専用フォルダー名、ファイル名、相対パス、サイズ、更新時刻などのメタデータはGoogle Driveから見えます。
-- 同期前に必ずプレビューを確認します。100 MiB超、危険なパス、大小文字・Unicode正規化で衝突するパスは拒否します。
+- 同期前に必ずプレビューを確認します。100 MiB超のローカルファイルはそのファイルだけスキップし、初回だけ報告した後は通知しません。危険なパス、大小文字・Unicode正規化で衝突するパスは拒否します。
 - 「安全なObsidianコア設定」を有効化しても、他プラグイン、テーマ、CSS、`data.json`、実行コードは同期しません。
 - 端末を紛失した場合や認証をやり直す場合は「Google接続を解除」からGoogle側の権限を取り消してください。
 

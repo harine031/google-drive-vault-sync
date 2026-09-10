@@ -56,14 +56,18 @@ export class SyncEngine {
     const [local, remoteFiles] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
     const remote = this.applyRemotePolicy(remoteFiles);
     assertNoCrossSidePathCollisions(local.map((file) => file.path), remote.map((file) => file.path));
-    return buildSyncPlan(local, remote, this.state);
+    const plan = buildSyncPlan(local, remote, this.state);
+    await this.markOversizedReports(plan);
+    return plan;
   }
 
   async previewRestore(): Promise<SyncAction[]> {
     const [local, remoteFiles] = await Promise.all([this.scanLocalFiles(), this.drive.listVaultFiles()]);
     const remote = this.applyRemotePolicy(remoteFiles);
     assertNoCrossSidePathCollisions(local.map((file) => file.path), remote.map((file) => file.path));
-    return buildRestorePlan(local, remote);
+    const plan = buildRestorePlan(local, remote);
+    await this.markOversizedReports(plan);
+    return plan;
   }
 
   async apply(plan: SyncAction[], onProgress?: SyncProgressCallback): Promise<SyncResult> {
@@ -213,6 +217,22 @@ export class SyncEngine {
     }));
   }
 
+  private async markOversizedReports(plan: SyncAction[]): Promise<void> {
+    const reported = new Set(this.state.reportedOversizedPaths ?? []);
+    let changed = false;
+    for (const action of plan) {
+      if (!action.local?.tooLarge) continue;
+      action.silent = reported.has(action.path);
+      if (!action.silent) {
+        reported.add(action.path);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.state.reportedOversizedPaths = [...reported].sort();
+    await this.persist();
+  }
+
   private async scanLocalFiles(): Promise<LocalFileInfo[]> {
     const paths = await this.walk("");
     const included = paths.filter((path) => !isPathExcluded(
@@ -226,7 +246,19 @@ export class SyncEngine {
     for (const path of included) {
       const stat = await this.app.vault.adapter.stat(path);
       if (!stat || stat.type !== "file") continue;
-      assertAllowedSize(stat.size, path);
+      if (!Number.isFinite(stat.size) || stat.size < 0) {
+        throw new Error(`${path}: ファイルサイズを確認できません`);
+      }
+      if (stat.size > MAX_FILE_SIZE_BYTES) {
+        results.push({
+          path,
+          hash: "",
+          size: stat.size,
+          mimeType: mimeTypeForPath(path),
+          tooLarge: true
+        });
+        continue;
+      }
       const bytes = await this.app.vault.adapter.readBinary(path);
       assertAllowedSize(bytes.byteLength, path);
       results.push({ path, hash: await sha256Hex(bytes), size: bytes.byteLength, mimeType: mimeTypeForPath(path) });
@@ -291,7 +323,11 @@ export class SyncEngine {
     const currentByPath = new Map(current.map((file) => [file.path, file]));
     for (const expected of planned) {
       const found = currentByPath.get(expected.path);
-      if (!found || found.hash !== expected.hash || found.size !== expected.size || found.mimeType !== expected.mimeType) {
+      if (!found ||
+          found.hash !== expected.hash ||
+          found.size !== expected.size ||
+          found.mimeType !== expected.mimeType ||
+          found.tooLarge !== expected.tooLarge) {
         throw new Error(`${expected.path}: プレビュー後にローカル内容が変わりました。再プレビューしてください`);
       }
     }

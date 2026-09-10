@@ -138,6 +138,23 @@ describe("sync plan", () => {
       reason: expect.stringContaining("除外対象")
     });
   });
+
+  it("keeps an oversized local file visible without treating it as a Drive deletion", () => {
+    const oversized = { ...local("archive.zip", ""), size: 100 * 1024 * 1024 + 1, tooLarge: true };
+    const existing = remote("archive.zip", "old");
+    const state: SyncStateData = {
+      records: {
+        "archive.zip": { localHash: "old", remoteHash: "old", remoteFileId: existing.id }
+      },
+      lastSyncAt: null
+    };
+
+    expect(buildSyncPlan([oversized], [existing], state)[0]).toMatchObject({
+      kind: "skip",
+      path: "archive.zip",
+      reason: expect.stringContaining("同期対象外")
+    });
+  });
 });
 
 describe("restore plan", () => {

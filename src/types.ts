@@ -32,6 +32,7 @@ export interface SyncRecord {
 export interface SyncStateData {
   records: Record<string, SyncRecord>;
   lastSyncAt: string | null;
+  reportedOversizedPaths?: string[];
 }
 
 export interface LocalFileInfo {
@@ -39,6 +40,7 @@ export interface LocalFileInfo {
   hash: string;
   size: number;
   mimeType: string;
+  tooLarge?: boolean;
 }
 
 export interface RemoteFileInfo {
@@ -63,6 +65,7 @@ export interface SyncAction {
   reason: string;
   local?: LocalFileInfo;
   remote?: RemoteFileInfo;
+  silent?: boolean;
 }
 
 export interface PersistedPluginData {
@@ -85,5 +88,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
 export const DEFAULT_SYNC_STATE: SyncStateData = {
   records: {},
-  lastSyncAt: null
+  lastSyncAt: null,
+  reportedOversizedPaths: []
 };

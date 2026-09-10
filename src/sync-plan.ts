@@ -19,6 +19,16 @@ export function buildSyncPlan(
     const remote = remoteByPath.get(path);
     const record = state.records[path];
 
+    if (local?.tooLarge) {
+      return {
+        kind: "skip",
+        path,
+        local,
+        remote,
+        reason: "100 MiBを超えるため同期対象外（スキップ）"
+      };
+    }
+
     if (remote && !remote.encrypted) {
       const trustedByLocal = local?.hash === remote.hash;
       const trustedByState = record?.remoteHash === remote.hash && record.remoteFileId === remote.id;
@@ -132,6 +142,15 @@ export function buildRestorePlan(
   return paths.map((path): SyncAction => {
     const local = localByPath.get(path);
     const remote = remoteByPath.get(path);
+    if (local?.tooLarge) {
+      return {
+        kind: "skip",
+        path,
+        local,
+        remote,
+        reason: "100 MiBを超えるため同期対象外（スキップ）"
+      };
+    }
     if (remote?.deletedAt) {
       return { kind: "skip", path, local, remote, reason: "Driveで削除済みのため復元しません" };
     }

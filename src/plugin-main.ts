@@ -191,6 +191,8 @@ export default class GoogleDriveVaultSyncPlugin extends Plugin {
     this.settings = Object.assign(structuredClone(DEFAULT_SETTINGS), safeSettings);
     this.syncState = Object.assign(structuredClone(DEFAULT_SYNC_STATE), data?.syncState ?? {});
     this.syncState.records = data?.syncState?.records ?? {};
+    this.syncState.reportedOversizedPaths = (data?.syncState?.reportedOversizedPaths ?? [])
+      .filter((path) => typeof path === "string");
     this.consumedPairingIds = (data?.consumedPairingIds ?? []).filter((id) => /^[A-Za-z0-9_-]{22}$/.test(id)).slice(-32);
     let migrated = false;
     if (!raw.remoteFolderName || raw.remoteFolderName === DEFAULT_SETTINGS.remoteFolderName) {
@@ -222,14 +224,16 @@ class SyncPreviewModal extends Modal {
   onOpen(): void {
     this.titleEl.setText(this.title);
     const counts = new Map<string, number>();
-    for (const action of this.plan) counts.set(action.kind, (counts.get(action.kind) ?? 0) + 1);
+    for (const action of this.plan) {
+      if (!action.silent) counts.set(action.kind, (counts.get(action.kind) ?? 0) + 1);
+    }
     this.contentEl.createEl("p", {
-      text: `暗号化移行 ${counts.get("migrate") ?? 0} / アップロード ${counts.get("upload") ?? 0} / ダウンロード ${counts.get("download") ?? 0} / Drive削除登録 ${counts.get("mark-delete") ?? 0} / ローカル削除 ${counts.get("delete-local") ?? 0} / 競合 ${counts.get("conflict") ?? 0} / 保留 ${counts.get("skip") ?? 0}`
+      text: `暗号化移行 ${counts.get("migrate") ?? 0} / アップロード ${counts.get("upload") ?? 0} / ダウンロード ${counts.get("download") ?? 0} / Drive削除登録 ${counts.get("mark-delete") ?? 0} / ローカル削除 ${counts.get("delete-local") ?? 0} / 競合 ${counts.get("conflict") ?? 0} / スキップ・保留 ${counts.get("skip") ?? 0}`
     });
     const details = this.contentEl.createEl("div", { cls: "google-drive-vault-sync-summary" });
     details.setText(this.plan
-      .filter((action) => action.kind !== "noop")
-      .map((action) => `[${action.kind}] ${action.path} — ${action.reason}`)
+      .filter((action) => action.kind !== "noop" && !action.silent)
+      .map((action) => `[${action.local?.tooLarge ? "スキップ" : action.kind}] ${action.path} — ${action.reason}`)
       .join("\n") || "変更はありません");
     this.contentEl.createEl("p", { text: "実行直前にローカルとDriveのhashを再確認し、変更があれば中止します。削除反映対象は復旧可能なプラグイン専用ごみ箱へ移動します。" });
 
